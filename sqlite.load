@@ -1,0 +1,7 @@
+LOAD DATABASE
+     FROM scraper/output/leads.sqlite3
+     INTO postgresql://avnadmin:@164.90.155.207:22742/defaultdb?sslmode=require
+
+ WITH include drop, create tables, create indexes, reset sequences
+
+ SET work_mem to '256MB', maintenance_work_mem to '512MB';
