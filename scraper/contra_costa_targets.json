@@ -1,0 +1,55 @@
+{
+  "sources": [
+    {
+      "name": "contra_costa_county_permit_portal",
+      "url": "https://www.contracosta.ca.gov/9972/Permit-Portal",
+      "type": "permit_page",
+      "category": "county_permit",
+      "allow_public_contact_names": false,
+      "notes": "Official portal index. Use only public record pages that are reachable without an account."
+    },
+    {
+      "name": "city_of_concord_permits_and_business_license",
+      "url": "https://www.cityofconcord.org/168/Permits-and-Business-License",
+      "type": "permit_page",
+      "category": "city_permit",
+      "allow_public_contact_names": false
+    },
+    {
+      "name": "city_of_concord_building_division",
+      "url": "https://www.cityofconcord.org/180/Building-Division",
+      "type": "permit_page",
+      "category": "city_building",
+      "allow_public_contact_names": false
+    },
+    {
+      "name": "city_of_concord_business_licenses",
+      "url": "https://www.cityofconcord.org/378/Business-Licenses",
+      "type": "business_license_page",
+      "category": "city_business",
+      "allow_public_contact_names": false
+    },
+    {
+      "name": "city_of_concord_development_projects",
+      "url": "https://concordgis.ci.concord.ca.us/DevViewer/",
+      "type": "development_gis_page",
+      "category": "city_gis",
+      "allow_public_contact_names": false
+    },
+    {
+      "name": "publicrecordsdata_sample_address",
+      "type": "property_search",
+      "query": "1116 Fairlawn Ct Walnut Creek CA 94595",
+      "category": "property_search"
+    }
+  ],
+  "cities": [
+    "Walnut Creek",
+    "Concord",
+    "Pleasant Hill",
+    "Orinda",
+    "Lafayette",
+    "Martinez"
+  ],
+  "notes": "These are public county and city directory-style targets for initial discovery. The scraper should treat them as reference sources and avoid collecting personal or sensitive information."
+}

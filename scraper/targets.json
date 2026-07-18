@@ -1,0 +1,9 @@
+{
+  "sources": [
+    {
+      "name": "contra_costa_assessor_sample",
+      "url": "https://example.com",
+      "type": "public_page"
+    }
+  ]
+}

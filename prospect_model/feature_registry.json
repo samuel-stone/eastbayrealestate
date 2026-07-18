@@ -1,0 +1,43 @@
+{
+  "version": "0.1",
+  "purpose": "Property-level public-record research prioritization; not individual propensity scoring.",
+  "allowed_features": [
+    {
+      "name": "verified_parcel",
+      "source": "Contra Costa County public parcel GIS download",
+      "level": "property",
+      "description": "Address and APN exist in a current official parcel file."
+    },
+    {
+      "name": "building_permit_count_24m",
+      "source": "Approved official county/city permit record adapter",
+      "level": "property",
+      "description": "Count of publicly visible building permits during the previous 24 months."
+    },
+    {
+      "name": "planning_application_count_24m",
+      "source": "Approved official county/city planning record adapter",
+      "level": "property",
+      "description": "Count of publicly visible planning applications during the previous 24 months."
+    },
+    {
+      "name": "major_project_type",
+      "source": "Approved official public record",
+      "level": "property",
+      "description": "Normalized public project category such as ADU, addition, subdivision, or demolition."
+    },
+    {
+      "name": "market_context_index",
+      "source": "Licensed or openly licensed aggregate market dataset",
+      "level": "aggregate geography",
+      "description": "Market context only; must not encode demographic or protected-class proxies."
+    }
+  ],
+  "prohibited_features": [
+    "protected characteristics or proxies",
+    "names, phone numbers, emails, social profiles, or household members",
+    "income, credit, financial distress, or consumer-report information",
+    "demographic, language, religion, family-status, disability, or age data",
+    "unlicensed listing-site or people-search data"
+  ]
+}
