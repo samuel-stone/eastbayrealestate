@@ -5,3 +5,4 @@ scraper/output/
 output/
 .envleads.csv
 leads.csv
+.env
