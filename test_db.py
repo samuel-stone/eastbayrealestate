@@ -1,7 +1,7 @@
 import psycopg2
 
 # Replace this with your actual connection string
-DATABASE_URL = "postgresql://avnadmin:@164.90.155.207:22742/defaultdb?sslmode=require"
+DATABASE_URL = "os.getenv("DATABASE_URL")"
 
 def test_connection():
     try:
