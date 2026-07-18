@@ -6,3 +6,4 @@ output/
 .envleads.csv
 leads.csv
 .env
+*.save
