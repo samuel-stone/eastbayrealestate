@@ -164,8 +164,9 @@ def save_to_sandbox(leads):
         print("No leads to save.")
         return
         
-    print(f"\nSaving {len(leads)} detailed leads to the database...")
+    print(f"\nAttempting to commit {len(leads)} leads to the database...")
     
+    # Use explicit column names and ensure price is cast to integer
     insert_query = text("""
         INSERT INTO leads_sandbox 
         (address, lead_rating, price, beds, baths, sqft, property_type, last_source_url, last_notes)
@@ -174,17 +175,19 @@ def save_to_sandbox(leads):
     
     with engine.begin() as conn:
         for lead in leads:
-            conn.execute(insert_query, {
-                "address": lead["address"],
-                "rating": lead["rating"],
-                "price": lead["price"],
-                "beds": lead["beds"],
-                "baths": lead["baths"],
-                "sqft": lead["sqft"],
-                "property_type": lead["property_type"],
-                "url": lead["url"],
-                "notes": "Deep Stealth Crawler with Regex Engine"
-            })
+            # Clean data before insertion
+            clean_data = {
+                "address": lead.get("address"),
+                "rating": lead.get("rating", "C"),
+                "price": int(lead["price"]) if lead.get("price") else None,
+                "beds": float(lead["beds"]) if lead.get("beds") else None,
+                "baths": float(lead["baths"]) if lead.get("baths") else None,
+                "sqft": float(lead["sqft"]) if lead.get("sqft") else None,
+                "property_type": lead.get("property_type", "Unknown"),
+                "url": lead.get("url"),
+                "notes": f"v3.0.0 Regex: Price={lead.get('price')}"
+            }
+            conn.execute(insert_query, clean_data)
             
     print("Database commit successful!")
 
