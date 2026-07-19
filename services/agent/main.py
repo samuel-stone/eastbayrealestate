@@ -59,13 +59,19 @@ def gather_business_intelligence():
         return {"error": str(e)}
 
 def perform_local_research():
-    # Gather the data
+    # Gather data with fallback/empty values to prevent crashes
+    tech_vitals = get_resource_report()
+    errors = scan_logs_for_errors()
+    intel = gather_business_intelligence()
+    
     data = {
         "timestamp": datetime.now().isoformat(),
-        "business_intel": gather_business_intelligence()
+        "tech_vitals": tech_vitals,
+        "errors": errors,
+        "business_intel": intel
     }
     
-    # Bypass filesystem: Print directly to logs so Railway catches it
+    # Print for logs
     print(f"--- AGENT RESEARCH DATA ---")
     print(json.dumps(data, indent=2))
     print(f"---------------------------")
