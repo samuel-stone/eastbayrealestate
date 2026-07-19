@@ -1,5 +1,6 @@
 import os
 import time
+import glob
 import pandas as pd
 from playwright.sync_api import sync_playwright
 from playwright_stealth import Stealth
@@ -8,66 +9,91 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Safely get and fix the Database URL
 db_url = os.environ.get("DATABASE_URL", "")
 if db_url.startswith("postgres://"):
     db_url = db_url.replace("postgres://", "postgresql://", 1)
 
 engine = create_engine(db_url)
 TABLE_NAME = "leads_sandbox"
+TARGET_DIR = "target_lists"
 
 def enrich_address(page, address):
     search_query = address.replace(" ", "+")
-    print(f"Navigating to Redfin for: {address}")
     
     try:
         page.goto(f"https://www.redfin.com/stingray/do/lookup-location?location={search_query}")
         page.wait_for_selector(".summary-field", timeout=10000)
         
-        price = page.inner_text(".summary-field .price") if page.query_selector(".summary-field .price") else "N/A"
+        raw_price = page.inner_text(".summary-field .price") if page.query_selector(".summary-field .price") else None
         status = page.inner_text(".home-status-indicator") if page.query_selector(".home-status-indicator") else "Off-Market"
+        
+        # Clean the price string securely
+        price = int(''.join(filter(str.isdigit, raw_price))) if raw_price else None
     except Exception as e:
-        print(f"Could not extract data for {address}: {e}")
-        price, status = "Error", "Error"
+        print(f"Extraction error for {address}: {e}")
+        price, status = None, "Error"
         
     return {"address": address, "price": price, "status": status}
 
 def main():
-    print("Initializing stealth browser bypass for Redfin...")
-    
-    try:
-        df = pd.read_csv('adu_prospect_list.csv')
-    except FileNotFoundError:
-        print("Error: adu_prospect_list.csv not found. Create a test file or pull from DB.")
+    csv_files = glob.glob(f"{TARGET_DIR}/*.csv")
+    if not csv_files:
+        print("No target lists found.")
         return
 
-    # NEW V2 SYNTAX: Wrap sync_playwright() with Stealth().use_sync()
+    # Grab proxy credentials from Railway environment variables
+    PROXY_SERVER = os.environ.get("PROXY_SERVER")     
+    PROXY_USERNAME = os.environ.get("PROXY_USERNAME")
+    PROXY_PASSWORD = os.environ.get("PROXY_PASSWORD")
+
+    launch_args = {
+        "headless": True,
+        "args": [
+            "--no-sandbox", 
+            "--disable-setuid-sandbox", 
+            "--disable-dev-shm-usage"
+        ]
+    }
+
+    if PROXY_SERVER and PROXY_USERNAME and PROXY_PASSWORD:
+        launch_args["proxy"] = {
+            "server": PROXY_SERVER,
+            "username": PROXY_USERNAME,
+            "password": PROXY_PASSWORD
+        }
+        print("Residential proxy routing engaged for enrichment.")
+
     with Stealth().use_sync(sync_playwright()) as p:
-        browser = p.chromium.launch(headless=False, channel="chrome")
+        browser = p.chromium.launch(**launch_args)
         context = browser.new_context(
             user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36"
         )
         page = context.new_page()
         
-        with engine.connect() as conn:
-            for _, row in df.head(5).iterrows():
-                print(f"[Fetching] {row['address']}...")
+        for file in csv_files:
+            file_name = os.path.basename(file)
+            df = pd.read_csv(file)
+            
+            if 'address' not in df.columns:
+                continue
+
+            for _, row in df.iterrows():
                 data = enrich_address(page, row['address'])
                 
-                # Write results directly to Sandbox database
-                conn.execute(text(f"""
-                    INSERT INTO {TABLE_NAME} (address, lead_rating, last_notes) 
-                    VALUES (:addr, 'C', :notes)
-                """), {
-                    "addr": data["address"], 
-                    "notes": f"Price: {data['price']}, Status: {data['status']}"
-                })
-                conn.commit()
+                with engine.begin() as conn:
+                    conn.execute(text(f"""
+                        INSERT INTO {TABLE_NAME} (address, lead_rating, price, last_notes) 
+                        VALUES (:addr, 'C', :price, :notes)
+                    """), {
+                        "addr": data["address"], 
+                        "price": data["price"],
+                        "notes": f"Status: {data['status']} (List: {file_name})"
+                    })
                 
-                time.sleep(3) # Human delay
+                time.sleep(3)
                 
         browser.close()
-        print("Scrape complete. Sandbox database updated.")
 
 if __name__ == "__main__":
+    os.makedirs(TARGET_DIR, exist_ok=True)
     main()

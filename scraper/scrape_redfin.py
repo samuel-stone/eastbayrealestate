@@ -1,6 +1,7 @@
 import os
 import asyncio
 import random
+import re
 from sqlalchemy import create_engine, text
 from playwright.async_api import async_playwright
 from playwright_stealth import Stealth
@@ -29,9 +30,35 @@ async def scrape_properties():
     
     print("Initializing Stealth browser for deep patient crawl...")
     
+    # Grab proxy credentials from Railway environment variables
+    PROXY_SERVER = os.environ.get("PROXY_SERVER")     
+    PROXY_USERNAME = os.environ.get("PROXY_USERNAME")
+    PROXY_PASSWORD = os.environ.get("PROXY_PASSWORD")
+
+    # Base Docker-friendly launch arguments
+    launch_args = {
+        "headless": True,
+        "args": [
+            "--no-sandbox", 
+            "--disable-setuid-sandbox", 
+            "--disable-dev-shm-usage"
+        ]
+    }
+
+    # Inject proxy configuration if the variables exist in Railway
+    if PROXY_SERVER and PROXY_USERNAME and PROXY_PASSWORD:
+        launch_args["proxy"] = {
+            "server": PROXY_SERVER,
+            "username": PROXY_USERNAME,
+            "password": PROXY_PASSWORD
+        }
+        print("Residential proxy routing engaged.")
+    else:
+        print("Warning: No proxy detected. Using standard datacenter IP.")
+    
     # Wrap the async_playwright instance in Stealth
     async with Stealth().use_async(async_playwright()) as p:
-        browser = await p.chromium.launch(headless=True)
+        browser = await p.chromium.launch(**launch_args)
         context = await browser.new_context(
             user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
             viewport={"width": 1920, "height": 1080}
@@ -48,7 +75,6 @@ async def scrape_properties():
                 
                 try:
                     await page.goto(list_url, wait_until="domcontentloaded")
-                    # Patient human-like delay on the list page
                     await page.wait_for_timeout(random.randint(4000, 7000))
                 except Exception as e:
                     print(f"Failed to load {list_url}: {e}")
@@ -57,7 +83,7 @@ async def scrape_properties():
                 if page_num > 1 and "/page-" not in page.url:
                     break
                 
-                # 1. Extract all individual property links from the search page
+                # 1. Extract individual property links
                 property_links = await page.locator("a[href^='/CA/']").evaluate_all(
                     "elements => elements.map(e => e.href)"
                 )
@@ -70,41 +96,40 @@ async def scrape_properties():
                     
                 print(f"Discovered {len(property_links)} detail links. Processing slowly...")
                 
-                # 2. Iterate through each individual home detail page
+                # 2. Iterate through home detail pages
                 for url in property_links:
                     try:
                         print(f"-> Inspecting: {url}")
                         await page.goto(url, wait_until="domcontentloaded")
-                        
-                        # Extra long random delay to mimic reading the page and avoid IP bans
                         await page.wait_for_timeout(random.randint(5000, 9500)) 
                         
-                        # Dynamic extraction
+                        # --- BULLETPROOF REGEX EXTRACTION ---
                         try:
-                            await page.wait_for_selector('[data-rf-test-id="abp-price"]', timeout=10000)
-                            raw_price = await page.locator('[data-rf-test-id="abp-price"]').first.inner_text()
-                            price = int(raw_price.replace('$', '').replace(',', ''))
-                        except:
-                            price = None
+                            # Target the top half of the property page which contains the core stats
+                            top_section = await page.locator('.HomeInfo, .home-main-stats-variant, .home-info-v2, .keyDetailsList, header').first.inner_text(timeout=8000)
+                            
+                            # Price
+                            price_match = re.search(r'\$([\d,]+)', top_section)
+                            price = int(price_match.group(1).replace(',', '')) if price_match else None
+                            
+                            # Beds
+                            beds_match = re.search(r'([\d\.]+)\s*Beds?', top_section, re.IGNORECASE)
+                            beds = float(beds_match.group(1)) if beds_match else None
+                            
+                            # Baths
+                            baths_match = re.search(r'([\d\.]+)\s*Baths?', top_section, re.IGNORECASE)
+                            baths = float(baths_match.group(1)) if baths_match else None
+                            
+                            # Sqft
+                            sqft_match = re.search(r'([\d,]+)\s*Sq\.?\s*Ft\.?', top_section, re.IGNORECASE)
+                            sqft = float(sqft_match.group(1).replace(',', '')) if sqft_match else None
 
-                        try:
-                            raw_beds = await page.locator('[data-rf-test-id="abp-beds"] > .statsValue').first.inner_text()
-                            beds = float(raw_beds)
-                        except:
-                            beds = None
+                        except Exception as e:
+                            print(f"Extraction failed for {url}: {e}")
+                            price, beds, baths, sqft = None, None, None, None
+                            await page.screenshot(path=f"debug_captcha_{zip_code}.png")
 
-                        try:
-                            raw_baths = await page.locator('[data-rf-test-id="abp-baths"] > .statsValue').first.inner_text()
-                            baths = float(raw_baths)
-                        except:
-                            baths = None
-
-                        try:
-                            raw_sqft = await page.locator('[data-rf-test-id="abp-sqFt"] > .statsValue').first.inner_text()
-                            sqft = float(raw_sqft.replace(',', ''))
-                        except:
-                            sqft = None
-
+                        # Address Extraction
                         try:
                             street = await page.locator('.street-address').first.inner_text()
                             city_state = await page.locator('.dp-subtext').first.inner_text()
@@ -129,7 +154,6 @@ async def scrape_properties():
                         print(f"Failed to crawl {url}: {e}")
                         
                 page_num += 1
-                # Standard delay before moving to the next pagination list
                 await page.wait_for_timeout(random.randint(3000, 6000))
 
         await browser.close()
@@ -159,7 +183,7 @@ def save_to_sandbox(leads):
                 "sqft": lead["sqft"],
                 "property_type": lead["property_type"],
                 "url": lead["url"],
-                "notes": "Deep Stealth Crawler"
+                "notes": "Deep Stealth Crawler with Regex Engine"
             })
             
     print("Database commit successful!")
