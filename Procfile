@@ -1,1 +1,1 @@
-worker: python -m scraper.scrape_walnut_creek
+worker: python -m automation_engine.worker
