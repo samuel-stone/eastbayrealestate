@@ -1,14 +1,26 @@
 SCHEDULES = [
+
     {
-        "name": "scrape_listings",
-        "interval": 300
+        "name":
+        "scrape_listings"
     },
+
+
     {
-        "name": "process_leads",
-        "interval": 900
+        "name":
+        "enrich_properties"
     },
+
+
     {
-        "name": "daily_market_report",
-        "interval": 86400
+        "name":
+        "analyze_market"
+    },
+
+
+    {
+        "name":
+        "generate_report"
     }
+
 ]

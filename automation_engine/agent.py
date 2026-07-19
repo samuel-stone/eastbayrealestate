@@ -1,60 +1,71 @@
 import time
+import signal
+
 from datetime import datetime
 
-from automation_engine.agent_memory import (
-    init_memory,
-    remember
-)
-
-from automation_engine.agent_brain import analyze_system
-
-from automation_engine.agent_actions import (
-    retry_failed_jobs
-)
+from automation_engine.environment import validate_environment
+from automation_engine.agent_supervisor import analyze_system
 
 
-def think():
-
-    print("\nAGENT THINKING:", datetime.now())
-
-    report = analyze_system()
+running = True
 
 
-    print("\nOBSERVATIONS:")
+def shutdown(signum, frame):
 
-    for item in report["observations"]:
-        print("-", item)
+    global running
 
-
-    print("\nDECISIONS:")
-
-    for decision in report["decisions"]:
-        print("-", decision)
-
-
-    if "Retry failed jobs" in report["decisions"]:
-
-        retry_failed_jobs()
-
-
-    remember(
-        str(report)
+    print(
+        "Agent shutting down..."
     )
+
+    running = False
+
+
+
+signal.signal(signal.SIGTERM, shutdown)
+signal.signal(signal.SIGINT, shutdown)
+
 
 
 def main():
 
-    print("East Bay Automation Agent online")
+    validate_environment()
 
-    init_memory()
+    print(
+        "East Bay Autonomous Agent Online"
+    )
 
-    while True:
 
-        think()
+    while running:
 
-        time.sleep(300)
+        try:
+
+            report = analyze_system()
+
+            print(
+                "Agent report generated"
+            )
+
+
+        except Exception as e:
+
+            print(
+                "Agent failure:",
+                e
+            )
+
+
+        time.sleep(
+            900
+        )
+
+
+    print(
+        "Agent stopped cleanly"
+    )
+
 
 
 if __name__ == "__main__":
+
     main()
-    from automation_engine.environment import validate_environment
