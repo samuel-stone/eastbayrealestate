@@ -1,56 +1,60 @@
-import time
-from datetime import datetime
+import subprocess
+import sys
+import os
+
+
+TASKS = {
+
+    "scrape_listings": [
+        "-m",
+        "scraper.scrape_walnut_creek"
+    ],
+
+    "scrape_danville": [
+        "-m",
+        "scraper.scrape_danville"
+    ],
+
+    "process_leads": [
+        "-m",
+        "prospect_model.score_prospects"
+    ],
+
+    "daily_market_report": [
+        "run_reports.py"
+    ]
+
+}
 
 
 def run_task(job):
 
     name = job["name"]
 
-    print(
-        datetime.now(),
-        "Running:",
-        name
+    if name not in TASKS:
+        raise Exception(f"Unknown task: {name}")
+
+    command = [sys.executable] + TASKS[name]
+
+    print("EXECUTING:", " ".join(command))
+
+    env = os.environ.copy()
+    env["PYTHONPATH"] = os.getcwd()
+
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        env=env
     )
 
+    if result.stdout:
+        print(result.stdout)
 
-    if name == "scrape_listings":
+    if result.stderr:
+        print(result.stderr)
 
-        print("Launching scraper pipeline")
+    if result.returncode != 0:
+        raise Exception(f"Task failed: {name}")
 
-        # future:
-        # subprocess.run(["python","scraper/scrape_walnut_creek.py"])
-
-        time.sleep(5)
-
-        print("Listings complete")
-
-
-    elif name == "process_leads":
-
-        print("Running lead scoring")
-
-        # future:
-        # subprocess.run(["python","score_prospects.py"])
-
-        time.sleep(3)
-
-        print("Lead processing complete")
-
-
-    elif name == "daily_market_report":
-
-        print("Generating report")
-
-        # future:
-        # subprocess.run(["python","run_reports.py"])
-
-        time.sleep(2)
-
-        print("Report complete")
-
-
-    else:
-
-        raise Exception(
-            f"Unknown task {name}"
-        )
+    print("SUCCESS:", name)
