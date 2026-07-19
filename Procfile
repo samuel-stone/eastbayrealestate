@@ -1,1 +1,1 @@
-worker: python scraper/scrape_walnut_creek.py
+worker: python -m scraper.scrape_walnut_creek
