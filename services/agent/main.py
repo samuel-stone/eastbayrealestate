@@ -109,12 +109,22 @@ def process_task_queue():
         cur.execute("SELECT id, task_type, payload FROM ai_tasks WHERE status='pending' ORDER BY priority DESC, created_at ASC LIMIT 1;")
         task = cur.fetchone()
         if not task: cur.close(); conn.close(); return
+        
         task_id, task_type, payload = task
+        
+        # FIX: Ensure payload is a dictionary
+        if isinstance(payload, str):
+            data = json.loads(payload)
+        else:
+            data = payload
+            
         if task_type in ["autonomous_audit", "research_only"]:
-            autonomous_evolution_cycle(payload)
+            autonomous_evolution_cycle(json.dumps(data)) # Ensure it's passed as string
+            
         cur.execute("UPDATE ai_tasks SET status='completed' WHERE id=%s;", (task_id,))
         conn.commit(); cur.close(); conn.close()
-    except Exception as e: print(f"Process error: {e}")
+    except Exception as e: 
+        print(f"Process error: {e}")
 
 def main():
     print("Agent module loaded. Fallback mode active.")
