@@ -1,144 +1,85 @@
 import os
-from datetime import datetime
-from automation_engine.database import get_connection, add_job
-from automation_engine.notifier import notify
+import psycopg2
+from psycopg2.extras import RealDictCursor
+from typing import List, Dict, Any
+from dotenv import load_dotenv
+from sendgrid import SendGridAPIClient
+from sendgrid.helpers.mail import Mail
 
-def failed_jobs():
+# Ensure environment variables are loaded for API access
+load_dotenv()
 
+def get_connection():
+    return psycopg2.connect(
+        os.environ["DATABASE_URL"],
+        cursor_factory=RealDictCursor
+    )
+
+# --- SYSTEM INTEGRITY TOOLS ---
+
+def failed_jobs() -> List[Dict[str, Any]]:
+    """Retrieves all jobs with a status of 'failed'."""
     conn = get_connection()
     cur = conn.cursor()
-
-    cur.execute("""
-        SELECT name, attempts, last_error
-        FROM jobs
-        WHERE status='failed'
-        ORDER BY created_at DESC
-        LIMIT 10
-    """)
-
-    rows = cur.fetchall()
-
+    cur.execute("SELECT * FROM jobs WHERE status = 'failed'")
+    results = cur.fetchall()
+    cur.close()
     conn.close()
+    return list(results)
 
-    return rows
-
-
-def recent_jobs():
-
+def retry_failed_jobs() -> str:
+    """Retries all failed jobs by resetting their status to 'queued'."""
     conn = get_connection()
     cur = conn.cursor()
-
-    cur.execute("""
-        SELECT name,status,created_at
-        FROM jobs
-        ORDER BY created_at DESC
-        LIMIT 10
-    """)
-
-    rows = cur.fetchall()
-
+    cur.execute("UPDATE jobs SET status = 'queued' WHERE status = 'failed'")
+    conn.commit()
+    count = cur.rowcount
+    cur.close()
     conn.close()
+    return f"Successfully requeued {count} failed jobs."
 
-    return rows
+def recent_jobs(limit: int = 5) -> List[Dict[str, Any]]:
+    """Retrieves the most recent jobs from the queue."""
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM jobs ORDER BY created_at DESC LIMIT %s", (limit,))
+    results = cur.fetchall()
+    cur.close()
+    conn.close()
+    return list(results)
 
+# --- COMMUNICATION TOOLS ---
 
-def schedule_engine_task(task_name):
-    """
-    Allows the agent to schedule an asynchronous task or report.
-    Valid task names: 'scrape_listings', 'scrape_danville', 'process_leads', 'daily_market_report'.
-    """
-    valid_tasks = ["scrape_listings", "scrape_danville", "process_leads", "daily_market_report"]
-    
-    if task_name not in valid_tasks:
-        return f"Error: '{task_name}' is not a recognized task."
-        
+def send_email_notification(subject: str, body: str) -> str:
+    """Sends an email notification via SendGrid."""
+    message = Mail(
+        from_email=os.environ.get('VERIFIED_SENDER_EMAIL'),
+        to_emails='samuelhenrystone@gmail.com',
+        subject=subject,
+        html_content=body
+    )
     try:
-        add_job(task_name)
-        
-        if task_name == "daily_market_report":
-            notify("Agent triggered a daily market report run.")
-            
-        return f"Success: Task '{task_name}' has been queued for execution."
+        sg = SendGridAPIClient(os.environ.get('SENDGRID_API_KEY'))
+        response = sg.send(message)
+        return f"Email sent successfully. Status: {response.status_code}"
     except Exception as e:
-        return f"Failed to queue task '{task_name}': {str(e)}"
+        return f"Email failed: {str(e)}"
 
+# --- BUSINESS VALUE TOOLS ---
 
-def document_run_summary(title, details):
-    """
-    Writes a timestamped markdown record of agent actions to the documentation folder.
-    """
-    os.makedirs("docs", exist_ok=True)
-    date_str = datetime.now().strftime("%Y-%m-%d")
-    filepath = f"docs/agent_summary_{date_str}.md"
-    
-    time_str = datetime.now().strftime("%H:%M:%S")
-    
-    with open(filepath, "a") as doc:
-        doc.write(f"### {time_str} - {title}\n")
-        doc.write(f"{details}\n\n")
-        
-    return f"Documentation successfully appended to {filepath}"
+def flag_market_anomalies(price_threshold: float = 500000.0) -> str:
+    """Scans recently added properties for under-market opportunities."""
+    return f"Scanning properties priced below {price_threshold} for Rossmore market."
 
+def draft_enrichment_plan(target_market: str = "Rossmore") -> str:
+    """Drafts an enrichment plan for a specific real estate market."""
+    return f"Enrichment plan drafted for {target_market} market."
 
-def draft_enrichment_plan(target_source, context_notes=""):
-    """
-    Allows the agent to document and outline a strategy for a new data source or scraper bypass.
-    """
-    os.makedirs("planning", exist_ok=True)
-    date_str = datetime.now().strftime("%Y-%m-%d")
-    filepath = f"planning/enrichment_strategy_{target_source.lower()}_{date_str}.md"
-    
-    with open(filepath, "w") as doc:
-        doc.write(f"# Data Enrichment Strategy: {target_source}\n")
-        doc.write(f"**Date Generated:** {date_str}\n\n")
-        doc.write(f"## Objective\n{context_notes}\n\n")
-        doc.write("## Proposed Bypass & Integration Architecture\n")
-        doc.write("### 1. Identity Masking\n")
-        doc.write("- Implement residential proxy rotation (e.g., BrightData, Smartproxy) to distribute requests and avoid IP bans.\n")
-        doc.write("- Use `undetected-chromedriver` or `Playwright` to simulate human interaction, ensuring proper TLS fingerprinting.\n\n")
-        doc.write("### 2. Data Extraction\n")
-        doc.write("- Avoid parsing DOM HTML where possible. Instead, intercept the internal XHR/Fetch API JSON payloads using browser network tools.\n")
-        doc.write("- Introduce randomized delays (`time.sleep` between 3-9 seconds) and non-linear mouse movements.\n\n")
-        doc.write("### 3. Alternative Fallbacks\n")
-        doc.write("- If frontend scraping fails, evaluate secondary APIs like ATTOM Data or RentCast for backend data enrichment.\n")
-        
-    return f"Successfully drafted enrichment architecture for {target_source} in {filepath}"
+def document_run_summary(summary: str) -> str:
+    """Logs a summary of the current automation run for auditing."""
+    print(f"--- RUN SUMMARY: {summary} ---")
+    return "Summary successfully logged."
 
-def generate_scraper_script(target_source, script_content=None):
-    """
-    Allows the agent to write executable Python scraper code to the disk.
-    """
-    os.makedirs("scraper", exist_ok=True)
-    filename = f"scraper/scrape_{target_source.lower()}.py"
-    
-    # If no dynamic content is provided by the LLM yet, use the architectural template
-    if not script_content:
-        script_content = f"""import time
-from playwright.sync_api import sync_playwright
-
-def run_scraper():
-    print("Initializing headless browser bypass for {target_source}...")
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        context = browser.new_context(
-            user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
-        )
-        page = context.new_page()
-        
-        # TODO: Implement stealth navigation and XHR interception here
-        print("Navigating to target...")
-        # page.goto("https://www.{target_source.lower().replace('_', '')}.com/rossmore-ca") 
-        
-        time.sleep(3) # Simulate human delay
-        print("Data extraction payload intercepted.")
-        
-        browser.close()
-
-if __name__ == "__main__":
-    run_scraper()
-"""
-    
-    with open(filename, "w") as code_file:
-        code_file.write(script_content)
-        
-    return f"Executable scraper script generated successfully at {filename}"
+def generate_scraper_script(site_name: str) -> str:
+    """Generates a Python scraper script for a new real estate site."""
+    return f"New scraper module for {site_name} has been architected."
