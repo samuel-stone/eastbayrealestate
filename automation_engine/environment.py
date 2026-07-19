@@ -1,4 +1,8 @@
 import os
+from dotenv import load_dotenv
+
+
+load_dotenv()
 
 
 def validate_environment():
@@ -25,3 +29,7 @@ def validate_environment():
     print(
         "Environment validated"
     )
+
+
+if __name__ == "__main__":
+    validate_environment()
