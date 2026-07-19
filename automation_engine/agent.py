@@ -1,15 +1,15 @@
 import time
 from datetime import datetime
 
-from automation_engine.agent_actions import retry_failed_jobs
-from automation_engine.agent_tools import (
-    failed_jobs,
-    recent_jobs
-)
-
 from automation_engine.agent_memory import (
     init_memory,
     remember
+)
+
+from automation_engine.agent_brain import analyze_system
+
+from automation_engine.agent_actions import (
+    retry_failed_jobs
 )
 
 
@@ -17,34 +17,29 @@ def think():
 
     print("\nAGENT THINKING:", datetime.now())
 
-    failures = failed_jobs()
+    report = analyze_system()
 
-    if failures:
 
-        print("Failures detected:", len(failures))
+    print("\nOBSERVATIONS:")
+
+    for item in report["observations"]:
+        print("-", item)
+
+
+    print("\nDECISIONS:")
+
+    for decision in report["decisions"]:
+        print("-", decision)
+
+
+    if "Retry failed jobs" in report["decisions"]:
 
         retry_failed_jobs()
 
-        note = f"Detected and attempted recovery on failures: {failures}"
 
-        print(note)
-
-        remember(note)
-
-    else:
-
-        note = "System healthy"
-
-        print(note)
-
-        remember(note)
-
-
-    print("\nRecent jobs:")
-
-    for job in recent_jobs():
-        print(job)
-
+    remember(
+        str(report)
+    )
 
 
 def main():
@@ -58,7 +53,6 @@ def main():
         think()
 
         time.sleep(300)
-
 
 
 if __name__ == "__main__":
