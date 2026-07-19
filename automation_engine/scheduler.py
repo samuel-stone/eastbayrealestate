@@ -1,8 +1,27 @@
 import time
+import signal
 from datetime import datetime, timedelta
 
 from automation_engine.database import add_job, get_connection
 from automation_engine.schedules import SCHEDULES
+
+
+running = True
+
+
+def shutdown(signum, frame):
+
+    global running
+
+    print("Scheduler shutting down...")
+
+    running = False
+
+
+
+signal.signal(signal.SIGTERM, shutdown)
+signal.signal(signal.SIGINT, shutdown)
+
 
 
 def last_completed(name):
@@ -26,10 +45,8 @@ def last_completed(name):
 
     conn.close()
 
-    if row:
-        return row["completed_at"]
+    return row["completed_at"] if row else None
 
-    return None
 
 
 def job_exists(name):
@@ -55,27 +72,32 @@ def job_exists(name):
     return exists
 
 
+
 def should_run(schedule):
 
-    name = schedule["name"]
-    interval = schedule["interval"]
-
-    last = last_completed(name)
+    last = last_completed(schedule["name"])
 
     if not last:
         return True
 
-    return datetime.now(last.tzinfo) > last + timedelta(seconds=interval)
+    return (
+        datetime.now(last.tzinfo)
+        >
+        last + timedelta(seconds=schedule["interval"])
+    )
 
 
 
 def main():
 
-    print("Scheduler started")
+    print("East Bay Scheduler online")
 
-    while True:
+    while running:
 
-        print("checking schedules...", datetime.now())
+        print(
+            "Scheduler heartbeat:",
+            datetime.now()
+        )
 
         for schedule in SCHEDULES:
 
@@ -90,7 +112,12 @@ def main():
                     name
                 )
 
+
         time.sleep(60)
+
+
+    print("Scheduler stopped cleanly")
+
 
 
 if __name__ == "__main__":
