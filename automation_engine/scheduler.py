@@ -1,68 +1,27 @@
 import time
 from datetime import datetime
 
-from automation_engine.database import get_connection, init_db
-
-
-SCHEDULES = [
-    {
-        "name": "scrape_listings",
-        "interval_minutes": 5,
-    },
-    {
-        "name": "daily_market_report",
-        "interval_minutes": 60,
-    },
-]
-
-
-last_run = {}
-
-
-def enqueue_job(name):
-    conn = get_connection()
-    cur = conn.cursor()
-
-    cur.execute(
-        """
-        INSERT INTO jobs(name, status)
-        VALUES(%s, 'queued')
-        """,
-        (name,)
-    )
-
-    conn.commit()
-    cur.close()
-    conn.close()
-
-    print(f"queued: {name}")
-
-
-def should_run(name, interval):
-    now = time.time()
-
-    if name not in last_run:
-        last_run[name] = now
-        return True
-
-    if now - last_run[name] >= interval * 60:
-        last_run[name] = now
-        return True
-
-    return False
+from automation_engine.jobs import add_job
 
 
 def main():
-    init_db()
-
     print("Scheduler started")
 
-    while True:
-        print("checking schedules...", datetime.now())
+    last_run = None
 
-        for job in SCHEDULES:
-            if should_run(job["name"], job["interval_minutes"]):
-                enqueue_job(job["name"])
+    while True:
+        now = datetime.now()
+
+        # run once per day
+        if now.hour == 6 and last_run != now.date():
+            print("Creating daily scrape job")
+
+            add_job("scrape_listings")
+
+            last_run = now.date()
+
+        else:
+            print("scheduler heartbeat:", now)
 
         time.sleep(60)
 
