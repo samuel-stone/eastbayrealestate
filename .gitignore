@@ -32,3 +32,4 @@ aiven_backup.sql
 aiven_backup.sql
 .env
 __pycache__
+planning/

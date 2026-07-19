@@ -1,6 +1,6 @@
-import os
 import time
 import signal
+import sys
 
 from dotenv import load_dotenv
 
@@ -12,29 +12,37 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-# --------------------------------------------------
-# AGENT IMPORT
-# --------------------------------------------------
-
 from services.agent.main import process_task_queue
+
 
 
 # --------------------------------------------------
 # WORKER STATE
 # --------------------------------------------------
 
-RUNNING = True
+running = True
 
 
-def shutdown_handler(signum, frame):
 
-    global RUNNING
+def shutdown_handler(
+    signum,
+    frame
+):
+
+    global running
 
     print(
-        "Worker shutdown requested."
+        "\nWorker shutdown requested."
     )
 
-    RUNNING = False
+    running = False
+
+
+
+signal.signal(
+    signal.SIGINT,
+    shutdown_handler
+)
 
 
 signal.signal(
@@ -42,10 +50,6 @@ signal.signal(
     shutdown_handler
 )
 
-signal.signal(
-    signal.SIGINT,
-    shutdown_handler
-)
 
 
 # --------------------------------------------------
@@ -59,7 +63,7 @@ def run():
     )
 
 
-    while RUNNING:
+    while running:
 
         try:
 
@@ -74,7 +78,10 @@ def run():
             )
 
 
-        time.sleep(60)
+        time.sleep(
+            30
+        )
+
 
 
     print(
@@ -82,8 +89,12 @@ def run():
     )
 
 
+    sys.exit(0)
+
+
+
 # --------------------------------------------------
-# ENTRY POINT
+# ENTRY
 # --------------------------------------------------
 
 if __name__ == "__main__":

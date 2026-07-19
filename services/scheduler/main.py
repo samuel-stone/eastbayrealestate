@@ -1,8 +1,5 @@
 import os
 import json
-import socket
-import uuid
-
 from datetime import datetime, timezone
 
 import psycopg2
@@ -15,37 +12,85 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-
 DATABASE_URL = os.getenv(
     "DATABASE_URL"
 )
 
 
 if not DATABASE_URL:
-
     raise RuntimeError(
         "DATABASE_URL missing."
     )
 
 
+
 # --------------------------------------------------
-# JOB CREATION
+# DATABASE
 # --------------------------------------------------
 
+def get_db_connection():
+
+    return psycopg2.connect(
+        DATABASE_URL
+    )
+
+
+
+# --------------------------------------------------
+# SCHEDULER
+# --------------------------------------------------
+
+def audit_already_pending():
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+
+    cur.execute(
+        """
+        SELECT COUNT(*)
+        FROM ai_tasks
+        WHERE task_type='autonomous_audit'
+        AND status IN ('pending','processing');
+        """
+    )
+
+
+    count = cur.fetchone()[0]
+
+
+    cur.close()
+    conn.close()
+
+
+    return count > 0
+
+
+
 def enqueue_job():
+
+    if audit_already_pending():
+
+        print(
+            "Scheduler: Audit already queued. Skipping."
+        )
+
+        return
+
+
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
 
 
     payload = {
 
-        "action": "daily_health_check",
+        "action":
+            "daily_health_check",
 
-        "source": "scheduler",
-
-        "scheduler_host": socket.gethostname(),
-
-        "execution_id": str(
-            uuid.uuid4()
-        ),
+        "source":
+            "scheduler",
 
         "requested_at":
             datetime.now(
@@ -55,80 +100,45 @@ def enqueue_job():
     }
 
 
-    with psycopg2.connect(
-        DATABASE_URL
-    ) as conn:
 
+    cur.execute(
+        """
+        INSERT INTO ai_tasks
+        (
+            task_type,
+            payload,
+            status
+        )
 
-        with conn.cursor() as cur:
-
-
-            # Prevent duplicate audits
-
-            cur.execute(
-                """
-                SELECT id
-                FROM ai_tasks
-                WHERE task_type='autonomous_audit'
-                AND status IN
-                (
-                    'pending',
-                    'processing'
-                )
-                LIMIT 1;
-                """
-            )
-
-
-            existing = cur.fetchone()
-
-
-            if existing:
-
-                print(
-                    f"Scheduler: Audit already queued. ID={existing[0]}"
-                )
-
-                return
+        VALUES
+        (
+            'autonomous_audit',
+            %s,
+            'pending'
+        );
+        """,
+        (
+            json.dumps(payload),
+        )
+    )
 
 
 
-            cur.execute(
-                """
-                INSERT INTO ai_tasks
-                (
-                    task_type,
-                    payload,
-                    status
-                )
+    conn.commit()
 
-                VALUES
-                (
-                    'autonomous_audit',
-                    %s,
-                    'pending'
-                )
-
-                RETURNING id;
-                """,
-
-                (
-                    json.dumps(payload),
-                )
-            )
+    cur.close()
+    conn.close()
 
 
-            job_id = cur.fetchone()[0]
 
-
-            print(
-                f"Scheduler: Job {job_id} enqueued."
-            )
+    print(
+        "Scheduler: Autonomous audit queued."
+    )
 
 
 
 # --------------------------------------------------
-# ENTRY POINT
+# ENTRY
 # --------------------------------------------------
 
 if __name__ == "__main__":

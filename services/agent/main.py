@@ -20,13 +20,7 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 if not DATABASE_URL:
     raise RuntimeError(
-        "DATABASE_URL missing. Check .env or Railway variables."
-    )
-
-
-if not GEMINI_API_KEY:
-    print(
-        "WARNING: GEMINI_API_KEY missing. Running in SAFE MODE."
+        "DATABASE_URL missing."
     )
 
 
@@ -36,6 +30,10 @@ if GEMINI_API_KEY:
     client = genai.Client(
         api_key=GEMINI_API_KEY
     )
+else:
+    print(
+        "WARNING: Gemini key missing. Safe mode enabled."
+    )
 
 
 # --------------------------------------------------
@@ -43,6 +41,7 @@ if GEMINI_API_KEY:
 # --------------------------------------------------
 
 def get_db_connection():
+
     return psycopg2.connect(
         DATABASE_URL
     )
@@ -58,7 +57,7 @@ def scan_project_structure():
 
     for root, dirs, filenames in os.walk("."):
 
-        skip_dirs = [
+        ignored = [
             ".git",
             "__pycache__",
             ".venv",
@@ -67,38 +66,51 @@ def scan_project_structure():
         ]
 
         if any(
-            skip in root
-            for skip in skip_dirs
+            item in root
+            for item in ignored
         ):
             continue
 
+
         for filename in filenames:
+
             files.append(
-                os.path.join(root, filename)
+                os.path.join(
+                    root,
+                    filename
+                )
             )
 
-    return "\n".join(files[:500])
+
+    return "\n".join(files)
+
 
 
 def get_database_telemetry():
 
-    conn = None
-
     try:
 
         conn = get_db_connection()
+        cur = conn.cursor()
 
-        with conn.cursor() as cur:
 
-            cur.execute(
-                """
-                SELECT status, COUNT(*)
-                FROM ai_tasks
-                GROUP BY status;
-                """
-            )
+        cur.execute(
+            """
+            SELECT status, COUNT(*)
+            FROM ai_tasks
+            GROUP BY status;
+            """
+        )
 
-            return dict(cur.fetchall())
+
+        result = cur.fetchall()
+
+
+        cur.close()
+        conn.close()
+
+
+        return result
 
 
     except Exception as e:
@@ -108,14 +120,9 @@ def get_database_telemetry():
         }
 
 
-    finally:
-
-        if conn:
-            conn.close()
-
 
 # --------------------------------------------------
-# GEMINI AI
+# AI ENGINE
 # --------------------------------------------------
 
 def analyze_system(prompt):
@@ -123,20 +130,13 @@ def analyze_system(prompt):
     if not client:
 
         return """
-# EastBay Autonomous Agent Report
+# SAFE MODE
 
-agent_status: safe_mode
-ai_available: false
+Gemini unavailable.
 
-Reason:
-Gemini client unavailable.
-
-System checks completed:
-- Agent running
-- Database reachable
-- Queue operational
-
+No API key configured.
 """
+
 
     try:
 
@@ -145,35 +145,32 @@ System checks completed:
             contents=prompt
         )
 
+
         return response.text
+
 
 
     except Exception as e:
 
         print(
-            f"Gemini unavailable: {e}"
+            "Gemini error:",
+            e
         )
 
-        return f"""
-# EastBay Autonomous Agent Report
 
-agent_status: safe_mode
-ai_available: false
-provider: Gemini
+        if (
+            "429" in str(e)
+            or
+            "RESOURCE_EXHAUSTED" in str(e)
+        ):
 
-Reason:
-{e}
+            raise RuntimeError(
+                "TEMP_AI_QUOTA_ERROR"
+            )
 
-Completed checks:
-- Database connection
-- Task queue
-- Worker execution
 
-Recommended action:
-Restore Gemini quota or billing and rerun audit.
+        raise
 
-Generated automatically.
-"""
 
 
 # --------------------------------------------------
@@ -192,20 +189,28 @@ def autonomous_evolution_cycle():
     telemetry = get_database_telemetry()
 
 
+
     prompt = f"""
-You are the autonomous architect for EastBayRealEstate.
 
-Review the current system.
+You are the autonomous architect
+for EastBayRealEstate.
 
-PROJECT STRUCTURE:
+
+Analyze the current system.
+
+
+PROJECT:
+
 {structure}
 
 
-DATABASE TELEMETRY:
+DATABASE:
+
 {telemetry}
 
 
 Create a practical engineering improvement plan.
+
 
 Focus on:
 
@@ -214,15 +219,18 @@ Focus on:
 - lead generation
 - database enrichment
 - AI improvements
-- operational improvements
+- scalability
+
 
 Return markdown only.
+
 """
 
 
-    plan = analyze_system(
+    report = analyze_system(
         prompt
     )
+
 
 
     Path(
@@ -234,7 +242,7 @@ Return markdown only.
 
     filename = (
         "planning/"
-        f"autonomous_plan_"
+        "autonomous_plan_"
         f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
     )
 
@@ -244,14 +252,15 @@ Return markdown only.
         "w"
     ) as f:
 
-        f.write(
-            plan
-        )
+        f.write(report)
+
 
 
     print(
-        f"Plan written: {filename}"
+        "Plan created:",
+        filename
     )
+
 
 
 # --------------------------------------------------
@@ -261,113 +270,140 @@ Return markdown only.
 def process_task_queue():
 
     conn = get_db_connection()
-
     cur = conn.cursor()
+
+
+    cur.execute(
+        """
+        SELECT id, task_type, payload, retry_count
+        FROM ai_tasks
+        WHERE status='pending'
+        ORDER BY created_at
+        LIMIT 1;
+        """
+    )
+
+
+    task = cur.fetchone()
+
+
+
+    if not task:
+
+        print(
+            "No pending tasks."
+        )
+
+        cur.close()
+        conn.close()
+
+        return
+
+
+
+    task_id, task_type, payload, retry_count = task
+
+
+
+    print(
+        f"Processing task {task_id}: {task_type}"
+    )
+
 
 
     try:
 
+
+        if task_type == "autonomous_audit":
+
+            autonomous_evolution_cycle()
+
+
+
+        elif task_type == "health_check":
+
+            print(
+                "Health check complete."
+            )
+
+
+        else:
+
+            print(
+                "Unknown task:",
+                task_type
+            )
+
+
+
         cur.execute(
             """
-            SELECT id, task_type, payload
-            FROM ai_tasks
-            WHERE status='pending'
-            ORDER BY created_at
-            FOR UPDATE SKIP LOCKED
-            LIMIT 1;
-            """
+            UPDATE ai_tasks
+            SET status='completed'
+            WHERE id=%s;
+            """,
+            (task_id,)
         )
 
 
-        task = cur.fetchone()
+        conn.commit()
 
 
-        if not task:
 
-            print(
-                "No pending tasks."
-            )
-
-            conn.commit()
-            return
-
-
-        task_id, task_type, payload = task
+    except RuntimeError as e:
 
 
         print(
-            f"Processing task {task_id}: {task_type}"
+            "Temporary failure:",
+            e
         )
 
 
         cur.execute(
             """
             UPDATE ai_tasks
-            SET status='processing'
+            SET
+                status='pending',
+                retry_count=retry_count+1
             WHERE id=%s;
             """,
             (task_id,)
         )
 
+
         conn.commit()
 
 
-        try:
 
-            if task_type == "autonomous_audit":
-
-                autonomous_evolution_cycle()
+    except Exception as e:
 
 
-            elif task_type == "health_check":
-
-                print(
-                    "Health:",
-                    get_database_telemetry()
-                )
+        print(
+            "Task failed:",
+            e
+        )
 
 
-            else:
-
-                print(
-                    f"Unknown task type: {task_type}"
-                )
-
-
-            cur.execute(
-                """
-                UPDATE ai_tasks
-                SET status='completed'
-                WHERE id=%s;
-                """,
-                (task_id,)
-            )
-
-
-            conn.commit()
+        cur.execute(
+            """
+            UPDATE ai_tasks
+            SET
+                status =
+                CASE
+                    WHEN retry_count >= 3
+                    THEN 'failed'
+                    ELSE 'pending'
+                END,
+                retry_count =
+                retry_count + 1
+            WHERE id=%s;
+            """,
+            (task_id,)
+        )
 
 
-        except Exception as e:
+        conn.commit()
 
-            print(
-                "Task failed:",
-                e
-            )
-
-
-            cur.execute(
-                """
-                UPDATE ai_tasks
-                SET
-                    status='failed',
-                    retry_count=retry_count+1
-                WHERE id=%s;
-                """,
-                (task_id,)
-            )
-
-
-            conn.commit()
 
 
     finally:
@@ -376,15 +412,28 @@ def process_task_queue():
         conn.close()
 
 
+
 # --------------------------------------------------
-# DIRECT TEST MODE ONLY
-# Worker owns the production loop
+# ENTRY
 # --------------------------------------------------
 
-if __name__ == "__main__":
+def main():
 
     print(
         "Agent module loaded."
     )
 
-    process_task_queue()
+
+    while True:
+
+        process_task_queue()
+
+        time.sleep(
+            60
+        )
+
+
+
+if __name__ == "__main__":
+
+    main()
