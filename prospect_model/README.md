@@ -38,11 +38,12 @@ outreach_events: Human-recorded, consent-aware outreach history.
 Daily Migration & Scoring: Syncs raw permits with lead data and updates prospect scores atomically:
 
 ###Bash
-python3 load_walnut_creek_permits.py
+python3 -m scripts.load_walnut_creek_permits
+
 Weekly Bulk PDF Extraction: Parses county reports and performs high-speed bulk updates:
 
 ###Bash
-python3 extract_weekly_permits.py <path_to_pdf>
+python3 -m prospect_model.extract_weekly_permits <path_to_pdf>
 
 ## Outreach Approach
 Compliance: Review scores, sources, and creative with brokerage compliance.
