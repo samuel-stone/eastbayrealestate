@@ -1,4 +1,5 @@
 from automation_engine.environment import validate_environment
+
 import time
 import signal
 
@@ -18,75 +19,90 @@ running = True
 
 
 def shutdown(signum, frame):
-
     global running
 
-    print("Worker shutting down...")
+    print(
+        "\nWorker shutdown signal received"
+    )
 
     running = False
-
 
 
 signal.signal(signal.SIGTERM, shutdown)
 signal.signal(signal.SIGINT, shutdown)
 
 
-
 def main():
+
     validate_environment()
+
     init_db()
 
-    print("East Bay Automation Worker online")
+    print(
+        "East Bay Automation Worker online"
+    )
 
 
     while running:
 
-        print(
-            "Worker heartbeat:",
-            datetime.now()
-        )
-
-
-        job = get_job()
-
-
-        if job:
+        try:
 
             print(
-                "found job:",
-                job
+                "Worker heartbeat:",
+                datetime.now()
             )
 
 
-            try:
-
-                run_task(job)
-
-                complete_job(job["id"])
-
-                print(
-                    "completed:",
-                    job["name"]
-                )
+            job = get_job()
 
 
-            except Exception as e:
+            if job:
 
                 print(
-                    "FAILED:",
-                    e
-                )
-
-                fail_job(
-                    job["id"],
-                    e
+                    "found job:",
+                    job
                 )
 
 
-        else:
+                try:
+
+                    run_task(job)
+
+                    complete_job(
+                        job["id"]
+                    )
+
+                    print(
+                        "completed:",
+                        job["name"]
+                    )
+
+
+                except Exception as e:
+
+                    print(
+                        "TASK FAILED:",
+                        e
+                    )
+
+                    fail_job(
+                        job["id"],
+                        e
+                    )
+
+
+            else:
+
+                print(
+                    "no jobs"
+                )
+
+
+        except Exception as e:
 
             print(
-                "no jobs"
+                "WORKER ERROR:",
+                e
             )
 
 
@@ -96,7 +112,6 @@ def main():
     print(
         "Worker stopped cleanly"
     )
-
 
 
 if __name__ == "__main__":
