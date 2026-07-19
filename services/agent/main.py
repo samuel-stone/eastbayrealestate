@@ -1,55 +1,46 @@
 import os
-from dotenv import load_dotenv
+import json
+import time
+import psycopg2
 from google import genai
 from google.genai import types
-from automation_engine.agent_tools import (
-    failed_jobs, 
-    retry_failed_jobs, 
-    send_email_notification, 
-    document_run_summary,
-    recent_jobs,
-    draft_enrichment_plan,
-    generate_scraper_script
-)
 
-load_dotenv()
+# Initialize GenAI Client
+client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
 
-def run_safe_mode_repair() -> str:
-    """Deterministic fallback: Repairs jobs without calling any AI."""
-    print("--- SAFE MODE: Executing Deterministic Repair ---")
-    jobs = failed_jobs()
-    if jobs:
-        msg = retry_failed_jobs()
+def get_db_connection():
+    return psycopg2.connect(os.environ['DATABASE_URL'])
+
+def process_task_queue():
+    """Polls the ai_tasks table and executes pending tasks."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    # Select next pending task
+    cur.execute("SELECT id, task_type, payload FROM ai_tasks WHERE status = 'pending' ORDER BY created_at ASC LIMIT 1;")
+    task = cur.fetchone()
+    
+    if task:
+        task_id, task_type, payload = task
+        print(f"Processing task {task_id}: {task_type}")
+        
         try:
-            send_email_notification("Alert: System Repair Executed (Safe Mode)", f"Repaired {len(jobs)} jobs.")
-        except Exception:
-            pass
-        return f"Safe Mode Repair: {msg}"
-    return "Safe Mode: No jobs to repair."
+            # Logic for your specific agent tasks
+            # e.g., if task_type == 'health_check': ...
+            cur.execute("UPDATE ai_tasks SET status = 'completed' WHERE id = %s", (task_id,))
+        except Exception as e:
+            print(f"Error processing task {task_id}: {e}")
+            cur.execute("UPDATE ai_tasks SET status = 'failed', retry_count = retry_count + 1 WHERE id = %s", (task_id,))
+            
+        conn.commit()
+    
+    cur.close()
+    conn.close()
 
-def analyze_system() -> str:
-    """Entry point for the service with AI-powered tool execution."""
-    try:
-        client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
-        tools = [failed_jobs, retry_failed_jobs, send_email_notification, document_run_summary]
-        config = types.GenerateContentConfig(tools=tools, temperature=0.0)
-        
-        # Using the current stable production model
-        chat = client.chats.create(model='gemini-3.5-flash', config=config)
-        
-        prompt = """
-        You are the Senior Autonomous Growth Analyst.
-        1. Call 'failed_jobs' to check for errors.
-        2. If jobs are failed, call 'retry_failed_jobs' and 'send_email_notification'.
-        3. If no jobs are failed, call 'document_run_summary'.
-        """
-        
-        response = chat.send_message(prompt)
-        return response.text
-        
-    except Exception as e:
-        print(f"--- AI SERVICE UNAVAILABLE: {str(e)} ---")
-        return run_safe_mode_repair()
-
-if __name__ == "__main__":
-    print(analyze_system())
+def analyze_system(system_data):
+    """Main brain entry point for system analysis."""
+    response = client.models.generate_content(
+        model='gemini-2.0-flash',
+        contents=f"Analyze this system data: {system_data}"
+    )
+    return response.text
