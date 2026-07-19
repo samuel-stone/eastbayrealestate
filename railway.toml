@@ -1,0 +1,15 @@
+[deploy]
+# Build using Nixpacks, Railway's default
+startCommand = "python3 scraper/scrape_redfin.py"
+
+[services.discovery]
+name = "discovery"
+startCommand = "python3 scraper/discover_listings.py"
+# Set this to run once a day (e.g., 0 0 * * *)
+cronSchedule = "0 0 * * *"
+
+[services.scraper]
+name = "scraper"
+startCommand = "python3 scraper/scrape_redfin.py"
+# Set this to run every hour to process the queue
+cronSchedule = "0 * * * *"
