@@ -164,32 +164,30 @@ def save_to_sandbox(leads):
         print("No leads to save.")
         return
         
-    print(f"\nAttempting to commit {len(leads)} leads to the database...")
+    print(f"\nCommitting {len(leads)} records to database...")
     
-    # Use explicit column names and ensure price is cast to integer
+    # Targeting your exact schema: beds, baths, sqft, price, address, normalized_address
     insert_query = text("""
         INSERT INTO leads_sandbox 
-        (address, lead_rating, price, beds, baths, sqft, property_type, last_source_url, last_notes)
-        VALUES (:address, :rating, :price, :beds, :baths, :sqft, :property_type, :url, :notes)
+        (address, normalized_address, price, beds, baths, sqft, property_type, last_source_url, last_notes, lead_rating)
+        VALUES (:address, :normalized, :price, :beds, :baths, :sqft, :property_type, :url, :notes, :rating)
     """)
     
     with engine.begin() as conn:
         for lead in leads:
-            # Clean data before insertion
-            clean_data = {
+            conn.execute(insert_query, {
                 "address": lead.get("address"),
-                "rating": lead.get("rating", "C"),
-                "price": int(lead["price"]) if lead.get("price") else None,
+                "normalized": lead.get("address"), 
+                "price": float(lead["price"]) if lead.get("price") else None,
                 "beds": float(lead["beds"]) if lead.get("beds") else None,
                 "baths": float(lead["baths"]) if lead.get("baths") else None,
                 "sqft": float(lead["sqft"]) if lead.get("sqft") else None,
-                "property_type": lead.get("property_type", "Unknown"),
+                "property_type": "Residential",
                 "url": lead.get("url"),
-                "notes": f"v3.0.0 Regex: Price={lead.get('price')}"
-            }
-            conn.execute(insert_query, clean_data)
-            
-    print("Database commit successful!")
+                "notes": "v3.0.0 Regex Sledgehammer",
+                "rating": "C"
+            })
+    print("Database sync complete.")
 
 if __name__ == "__main__":
     leads = asyncio.run(scrape_properties())
