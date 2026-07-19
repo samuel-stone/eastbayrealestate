@@ -2,40 +2,20 @@ import subprocess
 import sys
 import os
 
-
 TASKS = {
-
-    "scrape_listings": [
-        "-m",
-        "scraper.scrape_walnut_creek"
-    ],
-
-    "scrape_danville": [
-        "-m",
-        "scraper.scrape_danville"
-    ],
-
-    "process_leads": [
-        "-m",
-        "prospect_model.score_prospects"
-    ],
-
-    "daily_market_report": [
-        "run_reports.py"
-    ]
-
+    "scrape_listings": ["-m", "scraper.scrape_walnut_creek"],
+    "scrape_danville": ["-m", "scraper.scrape_danville"],
+    "process_leads": ["-m", "prospect_model.score_prospects"],
+    "daily_market_report": ["run_reports.py"],
+    "scrape_zillow_redfin": ["scraper/scrape_zillow_redfin.py"]
 }
 
-
 def run_task(job):
-
     name = job["name"]
-
     if name not in TASKS:
         raise Exception(f"Unknown task: {name}")
 
     command = [sys.executable] + TASKS[name]
-
     print("EXECUTING:", " ".join(command))
 
     env = os.environ.copy()
@@ -50,10 +30,8 @@ def run_task(job):
 
     if result.stdout:
         print(result.stdout)
-
     if result.stderr:
         print(result.stderr)
-
     if result.returncode != 0:
         raise Exception(f"Task failed: {name}")
 
