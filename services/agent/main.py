@@ -1,180 +1,123 @@
 import os
 import time
 import json
+import shutil
 from datetime import datetime
 from pathlib import Path
-
 import psycopg2
 from dotenv import load_dotenv
 from google import genai
 
-# --------------------------------------------------
-# ENVIRONMENT
-# --------------------------------------------------
 load_dotenv()
-
 DATABASE_URL = os.getenv("DATABASE_URL")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-if not DATABASE_URL:
-    raise RuntimeError("DATABASE_URL missing.")
+client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
-client = None
-if GEMINI_API_KEY:
-    client = genai.Client(api_key=GEMINI_API_KEY)
-else:
-    print("WARNING: Gemini key missing. Safe mode enabled.")
+def get_db_connection(): return psycopg2.connect(DATABASE_URL)
 
-# --------------------------------------------------
-# DATABASE
-# --------------------------------------------------
-def get_db_connection():
-    return psycopg2.connect(DATABASE_URL)
+def scan_logs_for_errors():
+    Path("errors").mkdir(exist_ok=True)
+    found_errors = []
+    for log_file in Path(".").rglob("*.log"):
+        try:
+            content = log_file.read_text()
+            if "error" in content.lower() or "failed" in content.lower():
+                found_errors.append(str(log_file))
+        except: continue
+    return found_errors
 
-# --------------------------------------------------
-# OBSERVER FUNCTIONS
-# --------------------------------------------------
-def scan_project_structure():
-    files = []
-    for root, dirs, filenames in os.walk("."):
-        ignored = [".git", "__pycache__", ".venv", "venv", "node_modules"]
-        if any(item in root for item in ignored):
-            continue
-        for filename in filenames:
-            files.append(os.path.join(root, filename))
-    return "\n".join(files)
-
-def get_database_telemetry():
+def get_resource_report():
+    total, used, free = shutil.disk_usage(".")
+    db_size = "Unknown"
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        cur.execute("SELECT status, COUNT(*) FROM ai_tasks GROUP BY status;")
-        result = cur.fetchall()
-        cur.close()
-        conn.close()
-        return result
-    except Exception as e:
-        return {"database_error": str(e)}
+        cur.execute("SELECT pg_size_pretty(pg_database_size(current_database()));")
+        db_size = cur.fetchone()[0]
+        cur.close(); conn.close()
+    except: pass
+    return {"disk_free_gb": round(free / (2**30), 2), "db_size": db_size}
 
-# --------------------------------------------------
-# AI ENGINE
-# --------------------------------------------------
-def analyze_system(prompt):
-    if not client:
-        return "# SAFE MODE\nGemini unavailable. No API key configured."
-
+def gather_business_intelligence():
+    """Analyzes the actual lead database and market intake."""
     try:
-        response = client.models.generate_content(
-            model="gemini-2.0-flash",
-            contents=prompt
-        )
-        return response.text
+        conn = get_db_connection()
+        cur = conn.cursor()
+        
+        # 1. Analyze Prospect Quality (High-value targets)
+        cur.execute("SELECT lead_rating, COUNT(*) FROM leads GROUP BY lead_rating;")
+        lead_ratings = cur.fetchall()
+        
+        # 2. Market Intake (Scraped data volume)
+        cur.execute("SELECT COUNT(*) FROM scraped_property_data WHERE created_at > NOW() - INTERVAL '24 hours';")
+        scraped_volume = cur.fetchone()[0]
+        
+        cur.close(); conn.close()
+        return {"lead_ratings": lead_ratings, "scraped_volume_24h": scraped_volume}
     except Exception as e:
-        print("Gemini error:", e)
-        if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
-            raise RuntimeError("TEMP_AI_QUOTA_ERROR")
-        raise
+        return {"error": str(e)}
 
-# --------------------------------------------------
-# AUTONOMOUS AUDIT
-# --------------------------------------------------
+def perform_local_research():
+    Path("research").mkdir(exist_ok=True)
+    data = {
+        "timestamp": datetime.now().isoformat(),
+        "tech_vitals": get_resource_report(),
+        "errors": scan_logs_for_errors(),
+        "business_intel": gather_business_intelligence()
+    }
+    with open(f"research/log_{int(time.time())}.json", "w") as f:
+        json.dump(data, f)
+    return data
+
 def autonomous_evolution_cycle(payload):
-    # Parse the focus area from the scheduler payload
-    try:
-        data = json.loads(payload)
-        focus = data.get("focus", "general engineering")
-    except:
-        focus = "general engineering"
-
-    print(f"Starting autonomous evolution cycle. Focus: {focus}")
+    research = perform_local_research()
+    data = json.loads(payload)
+    focus = data.get("focus", "general engineering")
     
-    structure = scan_project_structure()
-    telemetry = get_database_telemetry()
-
-    prompt = f"""
-    You are the autonomous architect for EastBayRealEstate.
-    Your current priority focus is: {focus}.
-    
-    Analyze the current system.
-    PROJECT: {structure}
-    DATABASE: {telemetry}
-    
-    Create a practical, prioritized engineering improvement plan based on your focus: {focus}.
-    Focus on: reliability, automation, lead generation, database enrichment, AI improvements, and scalability.
-    Return markdown only.
-    """
-
-    report = analyze_system(prompt)
-    Path("planning").mkdir(exist_ok=True)
-    filename = f"planning/autonomous_plan_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
-    
-    with open(filename, "w") as f:
-        f.write(report)
-    print("Plan created:", filename)
-
-# --------------------------------------------------
-# QUEUE PROCESSOR
-# --------------------------------------------------
-def process_task_queue():
-    conn = get_db_connection()
-    cur = conn.cursor()
-    
-    # Priority-based selection
-    cur.execute("""
-        SELECT id, task_type, payload, retry_count 
-        FROM ai_tasks 
-        WHERE status='pending' 
-        ORDER BY priority DESC, created_at ASC 
-        LIMIT 1;
-    """)
-    task = cur.fetchone()
-
-    if not task:
-        print("No pending tasks.")
-        cur.close()
-        conn.close()
+    if not client:
+        print(f"LLM offline. Research cached.")
         return
 
-    task_id, task_type, payload, retry_count = task
-    print(f"Processing task {task_id}: {task_type}")
+    prompt = f"""
+    You are the Growth Architect for your Real Estate platform. Focus: {focus}.
+    
+    BUSINESS INTELLIGENCE: {json.dumps(research['business_intel'])}
+    SYSTEM VITALS: {json.dumps(research['tech_vitals'])}
+    
+    1. BUSINESS STRATEGY: You have {research['business_intel'].get('scraped_volume_24h', 0)} new property scrapes. 
+       Look at the 'lead_ratings' breakdown. Suggest how to prioritize the high-rated leads vs. the new scraped data.
+    2. TECHNICAL ACTION: Propose landing page, SEO, or lead-capture code changes to turn scraped properties into leads.
+    3. COMMIT PROPOSALS: Provide specific code change blocks.
+    
+    Return markdown only.
+    """
+    
+    response = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
+    
+    Path("planning").mkdir(exist_ok=True)
+    filename = f"planning/plan_{focus}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
+    with open(filename, "w") as f: f.write(response.text)
+    print(f"Plan created: {filename}")
 
+def process_task_queue():
     try:
-        if task_type == "autonomous_audit":
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT id, task_type, payload FROM ai_tasks WHERE status='pending' ORDER BY priority DESC, created_at ASC LIMIT 1;")
+        task = cur.fetchone()
+        if not task: cur.close(); conn.close(); return
+        task_id, task_type, payload = task
+        if task_type in ["autonomous_audit", "research_only"]:
             autonomous_evolution_cycle(payload)
-        elif task_type == "health_check":
-            print("Health check complete.")
-        else:
-            print("Unknown task:", task_type)
-
         cur.execute("UPDATE ai_tasks SET status='completed' WHERE id=%s;", (task_id,))
-        conn.commit()
+        conn.commit(); cur.close(); conn.close()
+    except Exception as e: print(f"Process error: {e}")
 
-    except RuntimeError as e:
-        print("Temporary failure:", e)
-        # Requeue with no penalty if it's a quota error
-        cur.execute("UPDATE ai_tasks SET status='pending', retry_count=retry_count+1 WHERE id=%s;", (task_id,))
-        conn.commit()
-    except Exception as e:
-        print("Task failed:", e)
-        cur.execute("""
-            UPDATE ai_tasks 
-            SET status = CASE WHEN retry_count >= 3 THEN 'failed' ELSE 'pending' END,
-                retry_count = retry_count + 1 
-            WHERE id=%s;
-        """, (task_id,))
-        conn.commit()
-    finally:
-        cur.close()
-        conn.close()
-
-# --------------------------------------------------
-# ENTRY
-# --------------------------------------------------
 def main():
-    print("Agent module loaded.")
+    print("Agent module loaded. Fallback mode active.")
     while True:
         process_task_queue()
-        time.sleep(60)
+        time.sleep(3600)
 
-if __name__ == "__main__":
-    main()
+if __name__ == "__main__": main()
