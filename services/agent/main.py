@@ -59,15 +59,17 @@ def gather_business_intelligence():
         return {"error": str(e)}
 
 def perform_local_research():
-    Path("research").mkdir(exist_ok=True)
+    # Gather the data
     data = {
         "timestamp": datetime.now().isoformat(),
-        "tech_vitals": get_resource_report(),
-        "errors": scan_logs_for_errors(),
         "business_intel": gather_business_intelligence()
     }
-    with open(f"research/log_{int(time.time())}.json", "w") as f:
-        json.dump(data, f)
+    
+    # Bypass filesystem: Print directly to logs so Railway catches it
+    print(f"--- AGENT RESEARCH DATA ---")
+    print(json.dumps(data, indent=2))
+    print(f"---------------------------")
+    
     return data
 
 def autonomous_evolution_cycle(payload):
