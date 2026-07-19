@@ -1,153 +1,80 @@
-import sqlite3
 import pandas as pd
 import pdfplumber
-import json
 import re
+import os
+import keyring
+import psycopg2
+from psycopg2.extras import execute_values
 from datetime import datetime
 
-# Database configuration
-DB_PATH = 'scraper/output/leads.sqlite3'
-LEADS_APN_COLUMN = 'parcel_number'
+# --- CONFIGURATION ---
+PASSWORD = keyring.get_password("eastbay-db-password", os.environ.get("USER"))
+DATABASE_URL = f"postgres://avnadmin:{PASSWORD}@pg-305dd876-eastbayrealestate.l.aivencloud.com:22742/defaultdb?sslmode=require"
 
 def extract_permit_data(file_path):
     all_records = []
-    current_record = None
+    # Simplified regex for robustness
+    line_pattern = re.compile(r"^([A-Z0-9]+-\d+)\s+[A-Z]+\s+[A-Za-z]+\s+\d{1,2}/\d{1,2}/\d{4}\s+\$[\d,]+\.\d{2}\s+(.*?)\s+(?:\d+\s+)?(\d{9})\s+(.*)")
 
-    # Regex to match the main permit line
-    line_pattern = re.compile(
-        r"^([A-Z0-9]+-\d+)\s+"        # Permit Number
-        r"[A-Z]+\s+"                  # Type
-        r"([A-Za-z]+)\s+"             # Status
-        r"(\d{1,2}/\d{1,2}/\d{4})\s+" # Date
-        r"\$[\d,]+\.\d{2}\s+"         # Valuation
-        r"(.*?)\s+"                   # Description (start)
-        r"(?:\d+\s+)?"                # Optional SQ FT
-        r"(\d{9})\s+"                 # APN
-        r"(.*)"                       # Address/Contractor
-    )
-
-    print(f"Parsing PDF: {file_path}...")
     with pdfplumber.open(file_path) as pdf:
         for page in pdf.pages:
             text = page.extract_text()
-            if not text:
-                continue
-                
+            if not text: continue
             for line in text.split('\n'):
-                match = line_pattern.match(line)
-                
+                match = line_pattern.match(line.strip())
                 if match:
-                    if current_record:
-                        all_records.append(current_record)
-                        
-                    current_record = {
-                        'permit_number': match.group(1),
-                        'status': match.group(2),
-                        'issued_date': match.group(3),
-                        'description': match.group(4).strip(),
-                        'apn': match.group(5)
-                    }
-                else:
-                    ignore_phrases = ['Contra Costa', 'Building Permits', 'Issued Between', 'City:', 'PERMIT NUMBER']
-                    if current_record and line.strip() and not any(line.startswith(p) for p in ignore_phrases):
-                        current_record['description'] += " " + line.strip()
-                        
-    if current_record:
-        all_records.append(current_record)
-        
-    df = pd.DataFrame(all_records)
-    print(f"Successfully parsed {len(df)} permits from the PDF.")
-    return df
+                    all_records.append({
+                        'permit_no': match.group(1),
+                        'description': match.group(2).strip(),
+                        'apn': match.group(3).strip()
+                    })
+    return pd.DataFrame(all_records)
 
-def load_to_database(df, db_path):
-    if df.empty:
-        print("No records found in PDF to load.")
-        return
+def load_to_database_bulk(df):
+    if df.empty: return
 
-    df.columns = [col.lower().strip() for col in df.columns]
-    df['apn_clean'] = df['apn'].astype(str).str.replace('-', '', regex=False).str.strip()
-    df = df[df['apn_clean'].str.len() >= 9].copy()
-    
-    major_keywords = 'adu|addition|subdivision|demolition|new construction'
-    df['is_major_project'] = df['description'].str.contains(major_keywords, case=False, na=False)
+    # 1. Connect to PostgreSQL
+    conn = psycopg2.connect(DATABASE_URL)
+    cursor = conn.cursor()
 
-    updated_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    sources_json = json.dumps(["county_weekly_report"])
-    
-    success_count = 0
-    
     try:
-        with sqlite3.connect(db_path) as conn:
-            cursor = conn.cursor()
-            
-            print("Mapping database APNs into memory for fast matching...")
-            # Fetch all APNs once (O(1) lookup in memory)
-            cursor.execute(f"SELECT id, {LEADS_APN_COLUMN} FROM leads WHERE {LEADS_APN_COLUMN} IS NOT NULL")
-            apn_to_lead_id = {}
-            for lead_id, parcel in cursor.fetchall():
-                clean_parcel = str(parcel).replace('-', '').strip()
-                apn_to_lead_id[clean_parcel] = lead_id
-            
-            print("Running rapid database updates...")
-            for _, row in df.iterrows():
-                apn = row['apn_clean']
-                
-                # Skip if this permit's APN isn't in our leads database
-                if apn not in apn_to_lead_id:
-                    continue
-                    
-                target_lead_id = apn_to_lead_id[apn]
-                has_major = bool(row['is_major_project'])
-                major_proj = row['description'] if has_major else None
-                
-                # Update by strict lead_id (Instant execution)
-                if has_major:
-                    update_sql = """
-                        UPDATE prospect_features
-                        SET 
-                            building_permit_count_24m = building_permit_count_24m + 1,
-                            major_project_type = CASE 
-                                WHEN major_project_type IS NULL THEN ? 
-                                ELSE major_project_type || '; ' || ? 
-                            END,
-                            fresh_observation = 1,
-                            feature_source_urls = ?,
-                            updated_at = ?
-                        WHERE lead_id = ?
-                    """
-                    cursor.execute(update_sql, (major_proj, major_proj, sources_json, updated_at, target_lead_id))
-                else:
-                    update_sql = """
-                        UPDATE prospect_features
-                        SET 
-                            building_permit_count_24m = building_permit_count_24m + 1,
-                            fresh_observation = 1,
-                            feature_source_urls = ?,
-                            updated_at = ?
-                        WHERE lead_id = ?
-                    """
-                    cursor.execute(update_sql, (sources_json, updated_at, target_lead_id))
-                
-                success_count += 1
-                    
-            conn.commit()
-            print(f"Pipeline executed. Successfully updated {success_count} matching records in the database.")
-            
-    except sqlite3.Error as e:
-        print(f"Database error: {e}")
+        # 2. Get Lead Mappings in one query
+        cursor.execute("SELECT id, REPLACE(parcel_number, '-', '') FROM leads WHERE parcel_number IS NOT NULL")
+        apn_map = {str(apn): lead_id for lead_id, apn in cursor.fetchall()}
 
-if __name__ == "__main__":
-    print("Starting weekly permit extraction pipeline...")
-    raw_df = extract_permit_data("permit_report.pdf")
-    load_to_database(raw_df, DB_PATH)
-    print("Pipeline complete.")
+        # 3. Prepare data for bulk update
+        # We only keep rows that exist in our leads database
+        df['lead_id'] = df['apn'].map(apn_map)
+        df_valid = df.dropna(subset=['lead_id']).copy()
+
+        print(f"Bulk updating {len(df_valid)} records...")
+
+        # 4. Use a Temporary Table for high-speed batch processing
+        cursor.execute("CREATE TEMP TABLE tmp_permits (lead_id INT, desc_text TEXT);")
+        execute_values(cursor, "INSERT INTO tmp_permits VALUES %s", df_valid[['lead_id', 'description']].values)
+
+        # 5. Perform a Single Set-Based Update
+        cursor.execute("""
+            UPDATE prospect_features pf
+            SET 
+                building_permit_count_24m = pf.building_permit_count_24m + 1,
+                fresh_observation = 1,
+                updated_at = NOW()
+            FROM tmp_permits t
+            WHERE pf.lead_id = t.lead_id;
+        """)
+        
+        conn.commit()
+        print("Bulk update successful.")
+    except Exception as e:
+        conn.rollback()
+        print(f"Error: {e}")
+    finally:
+        cursor.close()
+        conn.close()
 
 if __name__ == "__main__":
     import sys
-    # If a file is passed via the terminal, use it. Otherwise, default to permit_report.pdf
-    target_file = sys.argv[1] if len(sys.argv) > 1 else "permit_report.pdf"
-    
-    print(f"Starting weekly permit extraction pipeline for: {target_file}")
-    raw_df = extract_permit_data(target_file)
-    load_to_database(raw_df, DB_PATH)
-    print("Pipeline complete.")
+    file = sys.argv[1] if len(sys.argv) > 1 else "permit_report.pdf"
+    df = extract_permit_data(file)
+    load_to_database_bulk(df)
