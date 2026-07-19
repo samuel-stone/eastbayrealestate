@@ -10,3 +10,5 @@ python-dotenv
 sendgrid
 twilio
 google-genai
+playwright-stealth
+sqlalchemy
