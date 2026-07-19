@@ -1,12 +1,32 @@
 {
+  "version": "1.0",
+  "cities": [
+    "Walnut Creek",
+    "Concord",
+    "Pleasant Hill",
+    "Orinda",
+    "Lafayette",
+    "Martinez"
+  ],
   "sources": [
+    {
+      "name": "property_sample_fixture",
+      "url": "file:///Users/sam/Projects/eastbayrealestate/scraper/fixtures/property_sample.html",
+      "type": "fixture",
+      "category": "test"
+    },
+    {
+      "name": "contra_costa_assessor_sample",
+      "url": "https://example.com",
+      "type": "public_page",
+      "category": "test"
+    },
     {
       "name": "contra_costa_county_permit_portal",
       "url": "https://www.contracosta.ca.gov/9972/Permit-Portal",
       "type": "permit_page",
       "category": "county_permit",
-      "allow_public_contact_names": false,
-      "notes": "Official portal index. Use only public record pages that are reachable without an account."
+      "allow_public_contact_names": false
     },
     {
       "name": "city_of_concord_permits_and_business_license",
@@ -42,14 +62,5 @@
       "query": "1116 Fairlawn Ct Walnut Creek CA 94595",
       "category": "property_search"
     }
-  ],
-  "cities": [
-    "Walnut Creek",
-    "Concord",
-    "Pleasant Hill",
-    "Orinda",
-    "Lafayette",
-    "Martinez"
-  ],
-  "notes": "These are public county and city directory-style targets for initial discovery. The scraper should treat them as reference sources and avoid collecting personal or sensitive information."
+  ]
 }
