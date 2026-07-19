@@ -29,25 +29,46 @@ def run_scraper():
         page = context.new_page()
         
         # Targeting Rossmoor, CA to pull in local property data
-        target_url = "https://www.redfin.com/city/16162/CA/Rossmoor" 
+        target_url = "https://www.redfin.com/neighborhood/11198/CA/Walnut-Creek/Rossmoor"        
         print(f"Navigating to {target_url}...")
         
         try:
             page.goto(target_url)
             
-            # Allow time for the properties and JavaScript challenges to load
-            page.wait_for_timeout(5000) 
-            print("Data extraction payload intercepted.")
+            # Wait for the property cards to load on the screen
+            print("Waiting for property cards to render...")
+            page.wait_for_selector('.HomeCardContainer, .v2-interactive, .homecards', timeout=10000) 
+            page.wait_for_timeout(3000) # Give it an extra 3 seconds for prices to populate
             
-            # Write a placeholder discovery event to the Sandbox for testing the pipeline
+            print("Extracting property data...")
+            # Grab all the property cards on the first page
+            cards = page.query_selector_all('.HomeCardContainer, .bottomV2')
+            
+            extracted_count = 0
             with engine.connect() as conn:
-                conn.execute(text(f"""
-                    INSERT INTO {TABLE_NAME} (address, lead_rating) 
-                    VALUES ('Discovery Run - Rossmoor Market', 'B')
-                """))
+                # Loop through the first 10 cards we find
+                for card in cards[:10]:
+                    try:
+                        # Extract the address and price (handling Redfin's common CSS classes)
+                        addr_element = card.query_selector('.bp-Homecard__Address, .address')
+                        price_element = card.query_selector('.bp-Homecard__Price, .homecardV2Price')
+                        
+                        if addr_element:
+                            address = addr_element.inner_text().strip()
+                            price = price_element.inner_text().strip() if price_element else "Price N/A"
+                            
+                            # Insert the REAL data into the sandbox
+                            conn.execute(text(f"""
+                                INSERT INTO {TABLE_NAME} (address, lead_rating, last_notes) 
+                                VALUES (:addr, 'B', :notes)
+                            """), {"addr": address, "notes": f"Rossmoor Scrape - {price}"})
+                            extracted_count += 1
+                    except Exception as e:
+                        continue # Skip if a card is formatted weirdly
+                        
                 conn.commit()
                 
-            print("Sandbox database updated successfully.")
+            print(f"Success! Extracted {extracted_count} real properties to the sandbox.")
             
         except Exception as e:
             print(f"Scrape failed: {e}")
