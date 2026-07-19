@@ -1,1 +1,1 @@
-worker: python scripts/load_walnut_creek_permits.py
+worker: python scraper/scrape_walnut_creek.py
