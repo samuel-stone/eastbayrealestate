@@ -9,3 +9,4 @@ pdfplumber
 python-dotenv
 sendgrid
 twilio
+google-genai
