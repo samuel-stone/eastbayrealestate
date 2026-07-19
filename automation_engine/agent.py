@@ -4,7 +4,7 @@ import signal
 from datetime import datetime
 
 from automation_engine.environment import validate_environment
-from automation_engine.agent_supervisor import analyze_system
+from automation_engine.agent_brain import analyze_system
 
 
 running = True
@@ -43,7 +43,7 @@ def main():
             report = analyze_system()
 
             print(
-                "Agent report generated"
+                "Agent report generated. Check docs/ and planning/ directories."
             )
 
 

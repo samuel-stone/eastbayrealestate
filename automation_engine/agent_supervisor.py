@@ -6,7 +6,8 @@ from automation_engine.agent_tools import (
 )
 
 from automation_engine.agent_memory import remember
-
+from dotenv import load_dotenv
+load_dotenv()
 
 def analyze_system():
 
