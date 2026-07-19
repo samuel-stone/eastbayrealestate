@@ -28,3 +28,7 @@ railpack-plan.json
 railpack-plan.json
 .env
 sendgrid.env
+aiven_backup.sql
+aiven_backup.sql
+.env
+__pycache__
