@@ -1,21 +1,56 @@
 import time
+from datetime import datetime
 
 
 def run_task(job):
 
     name = job["name"]
 
-    print("Running task:", name)
+    print(
+        datetime.now(),
+        "Running:",
+        name
+    )
+
 
     if name == "scrape_listings":
-        print("Starting scraper...")
+
+        print("Launching scraper pipeline")
+
+        # future:
+        # subprocess.run(["python","scraper/scrape_walnut_creek.py"])
+
         time.sleep(5)
-        print("Listings scraped")
+
+        print("Listings complete")
+
 
     elif name == "process_leads":
-        print("Processing leads...")
+
+        print("Running lead scoring")
+
+        # future:
+        # subprocess.run(["python","score_prospects.py"])
+
         time.sleep(3)
-        print("Leads processed")
+
+        print("Lead processing complete")
+
+
+    elif name == "daily_market_report":
+
+        print("Generating report")
+
+        # future:
+        # subprocess.run(["python","run_reports.py"])
+
+        time.sleep(2)
+
+        print("Report complete")
+
 
     else:
-        print("Unknown task:", name)
+
+        raise Exception(
+            f"Unknown task {name}"
+        )

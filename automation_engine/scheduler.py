@@ -1,27 +1,47 @@
 import time
 from datetime import datetime
 
-from automation_engine.jobs import add_job
+from automation_engine.database import add_job, get_connection
+from automation_engine.schedules import SCHEDULES
+
+
+def job_exists(name):
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute(
+        """
+        SELECT 1
+        FROM jobs
+        WHERE name=%s
+        AND status IN ('queued','running')
+        LIMIT 1
+        """,
+        (name,)
+    )
+
+    exists = cur.fetchone()
+
+    conn.close()
+
+    return exists
 
 
 def main():
+
     print("Scheduler started")
 
-    last_run = None
-
     while True:
-        now = datetime.now()
 
-        # run once per day
-        if now.hour == 6 and last_run != now.date():
-            print("Creating daily scrape job")
+        print("checking schedules...", datetime.now())
 
-            add_job("scrape_listings")
+        for schedule in SCHEDULES:
 
-            last_run = now.date()
+            name = schedule["name"]
 
-        else:
-            print("scheduler heartbeat:", now)
+            if not job_exists(name):
+                add_job(name)
+                print("queued:", name)
 
         time.sleep(60)
 
