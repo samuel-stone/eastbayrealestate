@@ -1,36 +1,37 @@
-import re
-import asyncio
-import json
 import os
+import re
+import json
 import sys
+import asyncio
 import random
-
+print("LOADED scrape_redfin.py")
 from playwright.async_api import async_playwright
+
 from sqlalchemy import create_engine, text
+from dotenv import load_dotenv
 
 
 # --------------------------------------------------
-# CONFIGURATION
+# ENV
 # --------------------------------------------------
 
-DATABASE_URL = os.environ.get(
-    "DATABASE_URL",
-    ""
-).replace(
-    "postgres://",
-    "postgresql://",
-    1
-)
+load_dotenv()
+
+
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 
 if not DATABASE_URL:
 
-    print(
-        "CRITICAL: DATABASE_URL missing"
-    )
-
+    print("DATABASE_URL missing")
     sys.exit(1)
 
+
+DATABASE_URL = DATABASE_URL.replace(
+    "postgres://",
+    "postgresql://",
+    1
+)
 
 
 engine = create_engine(
@@ -40,10 +41,29 @@ engine = create_engine(
 
 
 # --------------------------------------------------
-# DATABASE
+# PARSER
 # --------------------------------------------------
 
-def get_pending_tasks():
+try:
+
+    from scraper.parse_redfin_html import parse_listing
+
+except Exception as e:
+
+    print(
+        "Parser unavailable:",
+        e
+    )
+
+    parse_listing = None
+
+
+
+# --------------------------------------------------
+# TASKS
+# --------------------------------------------------
+
+def get_tasks():
 
     with engine.begin() as conn:
 
@@ -54,17 +74,18 @@ def get_pending_tasks():
                     id,
                     payload
                 FROM ai_tasks
-                WHERE status='pending'
-                AND task_type='scrape_listing'
+                WHERE
+                    task_type='scrape_listing'
+                    AND status='pending'
                 ORDER BY id
-                LIMIT 20;
+                LIMIT 20
                 """
             )
         ).fetchall()
 
 
 
-def update_task_status(
+def update_task(
     task_id,
     status
 ):
@@ -80,102 +101,109 @@ def update_task_status(
                 """
             ),
             {
-                "status": status,
-                "id": task_id
+                "id": task_id,
+                "status": status
             }
         )
 
 
 
 # --------------------------------------------------
-# SAVE LEAD
+# ADDRESS FALLBACK
 # --------------------------------------------------
 
-async def save_to_sandbox(
-    lead
-):
+def address_from_url(url):
 
-    query = text(
-        """
-        INSERT INTO leads_sandbox
-        (
-            address,
-            price,
-            beds,
-            baths,
-            sqft,
-            property_type,
-            last_source_url,
-            last_notes,
-            status
-        )
-
-        VALUES
-        (
-            :address,
-            :price,
-            :beds,
-            :baths,
-            :sqft,
-            :property_type,
-            :url,
-            :notes,
-            'new'
-        )
-
-        """
+    match = re.search(
+        r'/([^/]+)-\d{5}/home',
+        url
     )
 
+
+    if not match:
+
+        return None
+
+
+    return (
+        match.group(1)
+        .replace(
+            "-",
+            " "
+        )
+        .title()
+    )
+
+
+
+# --------------------------------------------------
+# SAVE
+# --------------------------------------------------
+
+def save_lead(
+    data,
+    url,
+    note
+):
 
     with engine.begin() as conn:
 
         conn.execute(
-            query,
+            text(
+                """
+                INSERT INTO leads_sandbox
+                (
+                    address,
+                    price,
+                    beds,
+                    baths,
+                    sqft,
+                    last_source_url,
+                    last_notes,
+                    status
+                )
+
+                VALUES
+                (
+                    :address,
+                    :price,
+                    :beds,
+                    :baths,
+                    :sqft,
+                    :url,
+                    :notes,
+                    'new'
+                )
+                """
+            ),
             {
 
                 "address":
-                    lead.get(
-                        "address",
-                        "Unknown"
-                    ),
+                    data.get("address"),
 
 
                 "price":
-                    lead.get(
-                        "price"
-                    ),
+                    data.get("price"),
 
 
                 "beds":
-                    lead.get(
-                        "beds"
-                    ),
+                    data.get("beds"),
 
 
                 "baths":
-                    lead.get(
-                        "baths"
-                    ),
+                    data.get("baths"),
 
 
                 "sqft":
-                    lead.get(
-                        "sqft"
-                    ),
-
-
-                "property_type":
-                    "Residential",
+                    data.get("sqft"),
 
 
                 "url":
-                    lead.get(
-                        "url"
-                    ),
+                    url,
 
 
                 "notes":
-                    "Redfin scraper v3.0.2"
+                    note
 
             }
         )
@@ -183,225 +211,262 @@ async def save_to_sandbox(
 
 
 # --------------------------------------------------
-# EXTRACTION
+# REDFIN PLAYWRIGHT FETCH
 # --------------------------------------------------
 
-async def extract_listing(
+async def fetch_redfin(
     page,
     url
 ):
 
-
-    await page.goto(
-        url,
-        wait_until="domcontentloaded",
-        timeout=60000
-    )
-
-
-    await asyncio.sleep(
-        random.uniform(
-            4,
-            7
-        )
-    )
-
-
-    full_text = await page.evaluate(
-        "document.body.innerText"
-    )
-
-
     print(
-        "DEBUG PAGE LENGTH:",
-        len(full_text)
+        "OPENING PAGE"
     )
-
-
-    print(
-        full_text[:500]
-    )
-
-
-
-    price_match = re.search(
-        r'\$([\d,]+)',
-        full_text
-    )
-
-
-
-    beds_match = re.search(
-        r'([\d\.]+)\s*(?:Beds?|BD)',
-        full_text,
-        re.IGNORECASE
-    )
-
-
-
-    baths_match = re.search(
-        r'([\d\.]+)\s*(?:Baths?|BA)',
-        full_text,
-        re.IGNORECASE
-    )
-
-
-
-    sqft_match = re.search(
-        r'([\d,]+)\s*(?:Sq\.?\s*Ft|Square Feet)',
-        full_text,
-        re.IGNORECASE
-    )
-
-
-
-    address_match = re.search(
-        r'\d+\s+[A-Za-z0-9\s]+(?:St|Street|Dr|Drive|Ln|Lane|Ct|Court|Way|Rd|Road|Ave|Avenue)',
-        full_text
-    )
-
-
-
-    data = {
-
-        "address":
-            address_match.group(0)
-            if address_match
-            else "Unknown",
-
-
-        "price":
-            float(
-                price_match.group(1)
-                .replace(",", "")
-            )
-            if price_match
-            else None,
-
-
-        "beds":
-            float(
-                beds_match.group(1)
-            )
-            if beds_match
-            else None,
-
-
-        "baths":
-            float(
-                baths_match.group(1)
-            )
-            if baths_match
-            else None,
-
-
-        "sqft":
-            float(
-                sqft_match.group(1)
-                .replace(",", "")
-            )
-            if sqft_match
-            else None,
-
-
-        "url":
-            url
-
-    }
-
-
-
-    print(
-        "EXTRACTED:",
-        data
-    )
-
-
-    return data
-
-
-
-# --------------------------------------------------
-# PROCESS TASK
-# --------------------------------------------------
-
-async def process_task(
-    page,
-    task
-):
-
-    task_id = task.id
 
 
     try:
 
-        payload = json.loads(
-            task.payload
+        await page.goto(
+            url,
+            wait_until="domcontentloaded",
+            timeout=60000
         )
 
 
-        url = payload.get(
-            "url"
+        await page.wait_for_timeout(
+            5000
         )
-
-
-        print(
-            "-> Inspecting:",
-            url
-        )
-
-
-        listing = await extract_listing(
-            page,
-            url
-        )
-
-
-        await save_to_sandbox(
-            listing
-        )
-
-
-        update_task_status(
-            task_id,
-            "completed"
-        )
-
 
 
     except Exception as e:
 
         print(
-            "TASK FAILED:",
-            task_id,
+            "PAGE ERROR:",
+            e
+        )
+
+        return None
+
+
+
+    title = await page.title()
+
+
+    print(
+        "TITLE:",
+        title
+    )
+
+
+
+    html = await page.content()
+
+
+    print(
+        "HTML SIZE:",
+        len(html)
+    )
+
+
+
+    # save debugging copy
+
+    try:
+
+        with open(
+            "scraper/redfin_live_debug.html",
+            "w",
+            encoding="utf-8"
+        ) as f:
+
+            f.write(html)
+
+
+        print(
+            "Saved scraper/redfin_live_debug.html"
+        )
+
+
+    except Exception as e:
+
+        print(
+            "DEBUG SAVE ERROR:",
             e
         )
 
 
-        update_task_status(
-            task_id,
-            "failed"
+
+    if len(html) < 50000:
+
+        print(
+            "HTML TOO SMALL"
+        )
+
+        return None
+
+
+
+    if "Access Denied" in html:
+
+        print(
+            "ACCESS DENIED"
+        )
+
+        return None
+
+
+
+    return html
+
+
+
+# --------------------------------------------------
+# PROCESS
+# --------------------------------------------------
+
+async def process(
+    task,
+    page
+):
+
+    task_id = task.id
+
+
+    payload = task.payload
+
+
+    if isinstance(
+        payload,
+        str
+    ):
+
+        payload=json.loads(
+            payload
         )
 
 
-
-# --------------------------------------------------
-# WORKER
-# --------------------------------------------------
-
-async def run_worker():
-
-
-    print(
-        "Starting Redfin Worker v3.0.2"
+    url = payload.get(
+        "url"
     )
 
 
-    tasks = get_pending_tasks()
+    print()
+    print(
+        "TASK:",
+        task_id
+    )
+
+    print(
+        url
+    )
+
+
+
+    fallback = {
+
+        "address":
+            address_from_url(url),
+
+        "price":
+            None,
+
+        "beds":
+            None,
+
+        "baths":
+            None,
+
+        "sqft":
+            None
+
+    }
+
+
+
+    html = await fetch_redfin(
+        page,
+        url
+    )
+
+
+
+    if not html:
+
+        print(
+            "BLOCKED - leaving pending"
+        )
+
+        return
+
+
+
+    data = fallback
+
+
+
+    if parse_listing:
+
+        try:
+
+            parsed = parse_listing(
+                html,
+                url
+            )
+
+
+            if parsed:
+
+                data.update(
+                    parsed
+                )
+
+
+        except Exception as e:
+
+            print(
+                "PARSER ERROR:",
+                e
+            )
+
 
 
     print(
-        "Pending tasks:",
+        "DATA:",
+        data
+    )
+
+
+
+    save_lead(
+        data,
+        url,
+        "v8.0 Playwright Redfin scraper"
+    )
+
+
+    update_task(
+        task_id,
+        "completed"
+    )
+
+
+
+# --------------------------------------------------
+# MAIN
+# --------------------------------------------------
+
+async def main():
+
+    print(
+        "Starting Redfin Worker v8.0"
+    )
+
+
+    tasks=get_tasks()
+
+
+    print(
+        "Pending:",
         len(tasks)
     )
 
@@ -409,7 +474,7 @@ async def run_worker():
     if not tasks:
 
         print(
-            "No pending tasks."
+            "Complete"
         )
 
         return
@@ -420,13 +485,29 @@ async def run_worker():
 
 
         browser = await p.chromium.launch(
-            headless=True
+            headless=True,
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--no-sandbox"
+            ]
         )
 
 
         context = await browser.new_context(
-            user_agent=
-            "Mozilla/5.0 Chrome/127"
+
+            viewport={
+                "width": 1280,
+                "height": 900
+            },
+
+            user_agent=(
+                "Mozilla/5.0 "
+                "(Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 "
+                "(KHTML, like Gecko) "
+                "Chrome/127.0 Safari/537.36"
+            )
+
         )
 
 
@@ -437,9 +518,9 @@ async def run_worker():
         for task in tasks:
 
 
-            await process_task(
-                page,
-                task
+            await process(
+                task,
+                page
             )
 
 
@@ -454,20 +535,14 @@ async def run_worker():
 
         await browser.close()
 
-
-
-    print(
-        "Worker batch complete."
-    )
-
-
-
 # --------------------------------------------------
-# ENTRY
+# ENTRYPOINT
 # --------------------------------------------------
 
 if __name__ == "__main__":
 
+    print("CALLING MAIN")
+
     asyncio.run(
-        run_worker()
+        main()
     )
