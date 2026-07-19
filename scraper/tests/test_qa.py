@@ -8,7 +8,7 @@ def test_config():
     print("✓ Registry loaded successfully.")
 
     # Verify Database Connection
-    from load_walnut_creek_permits import get_db_connection
+    from scripts.load_walnut_creek_permits import get_db_connection
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT 1")

@@ -1,11 +1,26 @@
+# Environment / secrets
 .env
 *.save
+
+# OS files
 .DS_Store
+
+# Python cache
 __pycache__/
 *.pyc
+
+# Local generated data
+data/exports/
+data/archive/
+
+# Generated outputs
+output/
+permit_pdfs/
+
+# Logs
+*.log
+
+# Local config cache
 config/__pycache__/
 scraper/__pycache__/
-permit_pdfs/
-output/
-*.csv
-*.log
+scripts/__pycache__/
