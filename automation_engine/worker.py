@@ -1,3 +1,4 @@
+from automation_engine.environment import validate_environment
 import time
 import signal
 
@@ -32,7 +33,7 @@ signal.signal(signal.SIGINT, shutdown)
 
 
 def main():
-
+    validate_environment()
     init_db()
 
     print("East Bay Automation Worker online")

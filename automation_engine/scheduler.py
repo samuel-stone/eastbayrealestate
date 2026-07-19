@@ -89,7 +89,7 @@ def should_run(schedule):
 
 
 def main():
-
+    from automation_engine.environment import validate_environment
     print("East Bay Scheduler online")
 
     while running:

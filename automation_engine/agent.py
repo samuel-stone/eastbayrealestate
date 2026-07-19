@@ -57,3 +57,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    from automation_engine.environment import validate_environment
