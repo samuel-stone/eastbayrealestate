@@ -3,6 +3,7 @@ import pandas as pd
 import os
 import psycopg2
 import plotly.express as px
+import time
 
 st.set_page_config(page_title="East Bay Real Estate Intelligence & Prospecting", layout="wide")
 
@@ -12,17 +13,14 @@ st.markdown("Automated permit tracking, routing clusters, and local AI outreach 
 # --- Database Connection & Caching ---
 @st.cache_resource
 def get_db_connection():
-    # Streamlit will cache this connection object so it doesn't reconnect on every button click
     return psycopg2.connect(os.environ["DATABASE_URL"])
 
-@st.cache_data(ttl=15) 
+@st.cache_data(ttl=5) # Reduced cache time to 5 seconds to support live refreshing
 def fetch_data(query):
-    # Caches the data for 15 seconds to keep the dashboard snappy and protect the DB
     conn = get_db_connection()
     return pd.read_sql(query, conn)
 
 def queue_ai_job():
-    # Safely inserts a job into the queue instead of freezing the UI with os.system
     try:
         conn = get_db_connection()
         cur = conn.cursor()
@@ -36,7 +34,6 @@ def queue_ai_job():
 
 # --- Data Fetching ---
 try:
-    # Fetch live leads and features
     df = fetch_data("""
         SELECT 
             l.address, l.city, l.status, 
@@ -48,7 +45,6 @@ try:
         LIMIT 500
     """)
     
-    # Fetch live AI memory/jobs
     jobs_df = fetch_data("SELECT id, name, status, created_at, attempts, last_error FROM jobs ORDER BY created_at DESC LIMIT 10")
     status_df = fetch_data("SELECT name, status, COUNT(*) as total FROM jobs GROUP BY name, status ORDER BY name")
     
@@ -61,6 +57,9 @@ except Exception as e:
 # --- Sidebar Controls ---
 st.sidebar.header("Navigation & Filters")
 st.sidebar.info(f"Currently tracking {len(df)} live properties from the database.")
+
+st.sidebar.divider()
+auto_refresh = st.sidebar.checkbox("🔄 Enable Auto-Refresh (10s)", value=False, help="Automatically reload the dashboard every 10 seconds to watch the AI queue in real-time.")
 
 # --- Main KPI Metrics ---
 col1, col2, col3 = st.columns(3)
@@ -115,3 +114,8 @@ if st.button("Queue AI Analysis"):
         success = queue_ai_job()
     if success:
         st.success("Task successfully queued! The backend agent will pick it up shortly.")
+
+# --- Auto-Refresh Logic ---
+if auto_refresh:
+    time.sleep(10)
+    st.rerun()
