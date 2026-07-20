@@ -1,3 +1,5 @@
+import importlib
+
 # Task Registry mapping task names to their respective python modules
 TASK_REGISTRY = {
     "scrape_redfin": "scraper.scrape_redfin",
@@ -10,3 +12,19 @@ TASK_REGISTRY = {
 
 def get_task_module(task_name):
     return TASK_REGISTRY.get(task_name)
+
+def run_task(task_name):
+    """Dynamically loads and executes a task by its registered module path."""
+    module_path = get_task_module(task_name)
+    
+    if not module_path:
+        raise ValueError(f"Task '{task_name}' is not found in TASK_REGISTRY.")
+    
+    print(f"Loading module: {module_path}")
+    module = importlib.import_module(module_path)
+    
+    # Execute the module's main() function
+    if hasattr(module, 'main'):
+        module.main()
+    else:
+        raise AttributeError(f"Module '{module_path}' is missing a main() function to execute.")
