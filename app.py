@@ -47,7 +47,7 @@ if st.sidebar.button("⚡ Test & Start Local Model"):
         except Exception:
             st.sidebar.info("Running on High-Reliability Fallback Mode (Ollama offline).")
 
-# Main Tabs for Dashboard Organization (Agent History & Timeline moved to first position)
+# Main Tabs for Dashboard Organization (Agent History & Timeline first)
 tab_names = [
     "📈 Agent History & Timeline",
     "📍 Permits & Leads", 
@@ -276,12 +276,12 @@ with tab_proposals:
     try:
         with DatabasePool.get_connection() as conn:
             df_props = pd.read_sql("""
-                SELECT DISTINCT ON (observation->>'title') id, observation, created_at, 
+                SELECT DISTINCT ON ((observation::jsonb)->>'title') id, observation, created_at, 
                        COALESCE(status, 'pending') as status,
                        COALESCE(execution_output, '') as execution_output
                 FROM agent_memory 
                 WHERE observation LIKE '%proposal%' 
-                ORDER BY observation->>'title', created_at DESC 
+                ORDER BY (observation::jsonb)->>'title', created_at DESC 
                 LIMIT 10
             """, conn)
             

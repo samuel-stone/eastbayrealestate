@@ -40,3 +40,4 @@ permit_pdfs/
 __pycache__/
 *.pyc
 *.bak
+generated_analytics_*.ipynb
