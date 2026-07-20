@@ -1,68 +1,55 @@
-from pathlib import Path
+import os
+import json
 
 
-ROOT = Path(".")
+ROOT = "."
 
 
-IGNORE = {
-    ".git",
-    "__pycache__",
-    ".pytest_cache",
-    "redfin_profile",
-    ".DS_Store"
-}
+def scan_repository():
+
+    total_files = 0
+    python_files = []
+    docs = []
+    configs = []
 
 
-def inventory_repository():
+    for root, dirs, files in os.walk(ROOT):
 
-    files = []
-
-    for path in ROOT.rglob("*"):
-
-        if any(part in IGNORE for part in path.parts):
+        if ".git" in root:
             continue
 
-        if path.is_file():
+        for file in files:
 
-            files.append(
-                str(path)
-            )
+            total_files += 1
 
-    return sorted(files)
+            path = os.path.join(root, file)
+
+            if file.endswith(".py"):
+                python_files.append(path)
+
+            if file.endswith(".md"):
+                docs.append(path)
+
+            if "config" in path:
+                configs.append(path)
 
 
-
-def summarize_repository():
-
-    files = inventory_repository()
-
-    summary = {
-        "total_files": len(files),
-        "python_files": [
-            f for f in files
-            if f.endswith(".py")
-        ],
-        "docs": [
-            f for f in files
-            if f.endswith(".md")
-        ],
-        "configs": [
-            f for f in files
-            if "config" in f
-        ]
+    return {
+        "total_files": total_files,
+        "python_files": sorted(python_files),
+        "docs": sorted(docs),
+        "configs": sorted(configs)
     }
-
-    return summary
 
 
 
 if __name__ == "__main__":
 
-    import json
+    result = scan_repository()
 
     print(
         json.dumps(
-            summarize_repository(),
+            result,
             indent=2
         )
     )
