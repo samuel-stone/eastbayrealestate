@@ -5,6 +5,10 @@ import os
 
 TASKS = {
 
+    #
+    # Scraping
+    #
+
     "scrape_redfin":
         [
             "-m",
@@ -15,7 +19,56 @@ TASKS = {
     "scrape_listings":
         [
             "-m",
-            "scraper.scrape_redfin"
+            "scraper.discover_listings"
+        ],
+
+
+    "discover_listings":
+        [
+            "-m",
+            "scraper.discover_listings"
+        ],
+
+
+
+    #
+    # Lead / Property enrichment
+    #
+
+    "process_leads":
+        [
+            "-m",
+            "automation_engine.tasks.process_leads"
+        ],
+
+
+    "enrich_properties":
+        [
+            "-m",
+            "automation_engine.tasks.enrich_properties"
+        ],
+
+
+
+    #
+    # Market intelligence
+    #
+
+    "analyze_market":
+        [
+            "-m",
+            "prospect_model.analyze_market"
+        ],
+
+
+
+    #
+    # Reporting
+    #
+
+    "generate_report":
+        [
+            "run_reports.py"
         ],
 
 

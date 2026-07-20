@@ -1,0 +1,22 @@
+from automation_engine.enrichment import run_enrichment_batch
+
+
+def main():
+
+    print("PROCESS LEADS TASK STARTED")
+
+    # TODO:
+    # Replace with DB query for leads needing enrichment
+
+    properties = []
+
+    results = run_enrichment_batch(properties)
+
+    print(
+        "Processed leads:",
+        len(results)
+    )
+
+
+if __name__ == "__main__":
+    main()

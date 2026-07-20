@@ -12,7 +12,7 @@ from automation_engine.database import (
     fail_job
 )
 
-from automation_engine.tasks import run_task
+from automation_engine.task_registry import run_task
 
 
 running = True
