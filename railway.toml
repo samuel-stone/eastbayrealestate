@@ -2,25 +2,11 @@
 restartPolicyType = "always"
 
 
-# East Bay Automation Worker
-[[services]]
-name = "worker"
-
-[services.deploy]
-startCommand = "python3 -u -m automation_engine.worker"
-
-
-# East Bay Scheduler
-[[services]]
+[services.scheduler]
 name = "scheduler"
-
-[services.deploy]
 startCommand = "python3 -u -m automation_engine.scheduler"
 
 
-# East Bay AI Agent
-[[services]]
+[services.agent]
 name = "agent"
-
-[services.deploy]
 startCommand = "python3 -u -m automation_engine.agent"
