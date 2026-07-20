@@ -29,9 +29,22 @@ except Exception as e:
 st.title("🏡 East Bay Real Estate Autonomous Pipeline & AI Hub")
 st.markdown("Live monitoring, municipal permit scraping, valuation CMAs, and real estate prospecting automation.")
 
-# Sidebar Navigation / Status
+# Sidebar Navigation / Status & One-Click Model Test
 st.sidebar.header("⚙️ System Control Panel")
 model_choice = st.sidebar.text_input("Active Local LLM", value=os.environ.get("OLLAMA_MODEL", "qwen3-coder:30b"))
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("🤖 Local AI & Model Status")
+if st.sidebar.button("⚡ Test & Start Local Model"):
+    with st.spinner("Pinging local Ollama engine..."):
+        try:
+            res = subprocess.run(["ollama", "list"], capture_output=True, text=True, timeout=5)
+            if res.returncode == 0:
+                st.sidebar.success("Ollama Engine is Active & Ready!")
+            else:
+                st.sidebar.warning("Ollama responded, but check service status.")
+        except Exception:
+            st.sidebar.info("Running on High-Reliability Fallback Mode (Ollama offline).")
 
 # Main Tabs for Dashboard Organization (10 comprehensive tabs)
 tab_leads, tab_map, tab_scraper, tab_cmas, tab_architect, tab_notebooks, tab_proposals, tab_business, tab_labels, tab_history = st.tabs([
@@ -103,16 +116,25 @@ with tab_map:
         st.error(f"Error loading map analytics: {e}")
 
 with tab_scraper:
-    st.subheader("🔄 Live Municipal Permit Scraper & Ingestion Engine")
-    st.markdown("Trigger automated Playwright scrapers live against Walnut Creek and East Bay permit portals to ingest latest historical filings.")
+    st.subheader("🔄 Live Municipal Permit & Marketplace Scraper Engine")
+    st.markdown("Trigger automated Playwright and API extraction jobs live against municipal portals, Zillow, and Redfin feeds.")
 
-    scraper_municipality = st.selectbox("Select Municipality to Scrape", ["Walnut Creek", "Orinda", "Lafayette", "Rossmoor"])
+    scraper_municipality = st.selectbox(
+        "Select Municipality or Marketplace Target", 
+        ["Walnut Creek", "Rossmoor", "Orinda", "Lafayette", "Zillow East Bay Comps", "Redfin Walnut Creek Feed"]
+    )
     
-    if st.button("🚀 Trigger Live Permit Scraper"):
-        with st.spinner(f"Running Playwright scraper for {scraper_municipality}..."):
-            scraper_log = scraper_architect.run_live_scraper(scraper_municipality)
-        st.success("Scraper execution completed successfully!")
-        st.text_area("Live Scraper Execution Logs", scraper_log, height=200)
+    # Initialize session state cache for logs if not present
+    if "scraper_logs" not in st.session_state:
+        st.session_state.scraper_logs = {}
+
+    if st.button("🚀 Trigger Live Extraction Job"):
+        with st.spinner(f"Running scraper worker for {scraper_municipality}..."):
+            st.session_state.scraper_logs[scraper_municipality] = scraper_architect.run_live_scraper(scraper_municipality)
+        st.success("Extraction job completed successfully!")
+
+    if scraper_municipality in st.session_state.scraper_logs:
+        st.text_area("Live Scraper Execution & Audit Logs", st.session_state.scraper_logs[scraper_municipality], height=200, key=f"log_{scraper_municipality}")
 
 with tab_cmas:
     st.subheader("📊 Comparable Market Analysis (CMA) Pricing Explorer")
@@ -133,7 +155,7 @@ with tab_cmas:
 
 with tab_architect:
     st.subheader("🏗️ Local AI Codebase Architect")
-    st.markdown("Run a live architectural inspection of your repository code using your local Ollama instance.")
+    st.markdown("Run a live architectural inspection of your repository code using your local Ollama instance with robust timeout protection.")
     
     if st.button("Run Codebase Review & Proposals"):
         with st.spinner("AI Architect is analyzing your repository files..."):
@@ -143,7 +165,7 @@ with tab_architect:
 
 with tab_notebooks:
     st.subheader("📓 AI Analytics Workstation & Notebook Generator")
-    st.markdown("Architect, compile, and download custom Jupyter Notebooks containing Pandas and Plotly pipelines for your live real estate database.")
+    st.markdown("Architect, compile, and download custom Jupyter Notebooks containing Pandas, Plotly, and RandomForest ML pipelines for your live real estate database.")
 
     municipality_filter = st.selectbox("Select Municipality Focus:", ["Walnut Creek", "Orinda", "Lafayette", "Moraga", "Clayton"])
     
@@ -277,7 +299,7 @@ with tab_labels:
 
 with tab_history:
     st.subheader("📈 AI Agent History & Evolution Over Time")
-    st.markdown("Tracking automated code architect reviews, pipeline changes, and compiled analytics workbooks across commits.")
+    st.markdown("Tracking automated code architect reviews, scraper executions, pipeline changes, and compiled analytics workbooks across commits.")
 
     try:
         query = """
@@ -329,6 +351,6 @@ with tab_history:
             activity_counts = df_history.groupby('Date').size().reset_index(name='Reports Generated')
             st.bar_chart(activity_counts.set_index('Date'))
         else:
-            st.info("No agent memory records found yet. Make a git commit to trigger the post-commit reporting hook!")
+            st.info("No agent memory records found yet. Run a scraper job or git commit to trigger activity logging!")
     except Exception as e:
         st.error(f"Could not load agent history from database: {e}")
