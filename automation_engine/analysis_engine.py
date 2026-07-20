@@ -36,7 +36,7 @@ def analyze_system():
         )
 
         for row in rows:
-            print(row)
+            print(dict(row))
 
 
 
