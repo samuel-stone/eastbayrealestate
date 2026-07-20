@@ -48,7 +48,11 @@ TASKS = {
             "automation_engine.tasks.enrich_properties"
         ],
 
-
+    "ai_enrichment":
+        [
+            "-m",
+            "automation_engine.tasks.hybrid_ai_enrichment"
+        ],
 
     #
     # Market intelligence
