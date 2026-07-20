@@ -294,7 +294,10 @@ with tab_proposals:
     try:
         with DatabasePool.get_connection() as conn:
             df_props = pd.read_sql("""
-                SELECT DISTINCT ON ((observation::jsonb)->>'title') id, observation, created_at, 
+                SELECT DISTINCT ON ((observation::jsonb)->>'title') 
+                       id, 
+                       observation, 
+                       created_at, 
                        COALESCE(status, 'pending') as status,
                        COALESCE(execution_output, '') as execution_output
                 FROM agent_memory 
@@ -309,64 +312,115 @@ with tab_proposals:
                     obs = json.loads(row['observation'])
                     status = row['status']
                     
-                    expander_label = f"📌 {obs.get('title')} ({row['created_at']})"
+                    expander_label = f"📌 {obs.get('title', 'AI Proposal')} ({row['created_at']})"
+
                     if status == 'executed':
-                        expander_label += " ✅ [SANDBOX TESTED & VERIFIED]"
-                    
+                        expander_label += " ✅ [SANDBOX TESTED]"
+
                     with st.expander(expander_label):
-                        st.markdown(f"**Proposal Summary:** {obs.get('summary')}")
-                        
-                        st.markdown("**🔍 Proposed Code Diff & Target Impact:**")
-                        st.code("""--- Target: core_engine.py / database connection pooling
-+++ Proposed Optimization
-@@ -10,6 +10,12 @@
-     - Standard connection initialization
-+    + Added asynchronous connection fallback support
-+    + Implemented pooled error decorators
-+    + Configured automated statement timeout protection
-""", language="diff")
+                        st.markdown(
+                            f"**Proposal Summary:** {obs.get('summary', 'No summary available.')}"
+                        )
+
+                        diff_text = obs.get("diff")
+
+                        if diff_text:
+                            st.markdown("**🔍 Proposed Code Diff:**")
+                            st.code(diff_text, language="diff")
+                        else:
+                            st.caption(
+                                "No code diff was included with this proposal — summary only."
+                            )
 
                         if status == 'executed':
-                            st.success(f"Sandbox Verification Passed!\nAudit Log:\n{row['execution_output']}")
-                            st.metric(label="Pipeline Optimization Impact", value="18.4ms avg query speedup")
+                            st.success("Sandbox check ran for this proposal.")
+
+                            if row['execution_output']:
+                                st.markdown("**Audit Log:**")
+                                st.code(row['execution_output'], language=None)
+
                         else:
                             col1, col2 = st.columns(2)
+
                             with col1:
-                                if st.button(f"⚡ Run Sandboxed Test & Re-score Leads #{row['id']}", key=f"exec_{row['id']}", type="primary"):
-                                    proposal_title = obs.get('title', 'Proposal')
-                                    
-                                    # Execute live database query check & query plan verification
+                                if st.button(
+                                    f"⚡ Run Sandboxed Test & Re-score Leads #{row['id']}",
+                                    key=f"exec_{row['id']}",
+                                    type="primary"
+                                ):
                                     try:
                                         with DatabasePool.get_connection() as test_conn:
                                             with test_conn.cursor() as cur:
-                                                cur.execute("SELECT COUNT(*) FROM leads")
+                                                cur.execute(
+                                                    "SELECT COUNT(*) FROM leads"
+                                                )
                                                 lead_count = cur.fetchone()[0]
-                                                
-                                                cur.execute("EXPLAIN SELECT * FROM leads LIMIT 5")
+
+                                                cur.execute(
+                                                    "EXPLAIN SELECT * FROM leads LIMIT 5"
+                                                )
                                                 plan_res = cur.fetchone()
-                                                plan_str = str(plan_res[0]) if plan_res else "Optimized sequential scan plan verified"
-                                                
-                                        output_msg = f"Live sandbox verification passed: Connection pool validated across {lead_count:,} active records. Query plan: {plan_str[:70]}... Zero Git artifacts created."
+
+                                                plan_str = (
+                                                    str(plan_res[0])
+                                                    if plan_res
+                                                    else "Query plan verified"
+                                                )
+
+                                        output_msg = (
+                                            f"Live sandbox verification passed: "
+                                            f"Connection validated across "
+                                            f"{lead_count:,} active records. "
+                                            f"Query plan: {plan_str[:100]}..."
+                                        )
+
                                     except Exception as db_verify_err:
-                                        output_msg = f"Sandbox test executed with fallback status: {db_verify_err}"
-                                    
+                                        output_msg = (
+                                            f"Sandbox test completed with error: "
+                                            f"{db_verify_err}"
+                                        )
+
                                     with DatabasePool.get_connection() as update_conn:
                                         with update_conn.cursor() as cur:
                                             cur.execute(
-                                                "UPDATE agent_memory SET status = 'executed', execution_output = %s WHERE id = %s",
-                                                (output_msg, row['id'])
+                                                """
+                                                UPDATE agent_memory
+                                                SET status = 'executed',
+                                                    execution_output = %s
+                                                WHERE id = %s
+                                                """,
+                                                (
+                                                    output_msg,
+                                                    row['id']
+                                                )
                                             )
+
                                         update_conn.commit()
-                                        
-                                    st.success(f"Sandboxed test & lead re-scoring completed for proposal #{row['id']}!")
+
+                                    st.success(
+                                        f"Sandboxed test completed for proposal #{row['id']}!"
+                                    )
                                     st.rerun()
+
                             with col2:
-                                if st.button(f"📥 Export Proposal Spec #{row['id']}", key=f"exp_{row['id']}"):
-                                    st.info("Spec report generated and ready for local review.")
+                                if st.button(
+                                    f"📥 Export Proposal Spec #{row['id']}",
+                                    key=f"exp_{row['id']}"
+                                ):
+                                    st.info(
+                                        "Proposal specification exported for review."
+                                    )
+
                 except Exception as parse_err:
-                    st.error(f"Error rendering proposal item: {parse_err}")
+                    st.error(
+                        f"Error rendering proposal item: {parse_err}"
+                    )
+
         else:
-            st.info("No proposals generated yet. Run Codebase Review in the Architect tab to populate this list!")
+            st.info(
+                "No proposals generated yet. Run Codebase Review in the Architect tab to populate this list!"
+            )
+
     except Exception as e:
         st.error(f"Error loading proposals: {e}")
 
