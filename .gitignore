@@ -41,3 +41,4 @@ __pycache__/
 *.pyc
 *.bak
 generated_analytics_*.ipynb
+*.csv
