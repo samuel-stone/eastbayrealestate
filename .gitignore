@@ -1,7 +1,9 @@
 # Environment / secrets
 .env
 *.save
-
+redfin_profile/
+redfin_debug.png
+scraper/redfin_live_debug.html
 # OS files
 .DS_Store
 
