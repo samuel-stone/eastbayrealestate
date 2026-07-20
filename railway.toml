@@ -7,6 +7,11 @@ name = "scheduler"
 startCommand = "python3 -u -m automation_engine.scheduler"
 
 
+[services.worker]
+name = "worker"
+startCommand = "python3 -u -m automation_engine.worker"
+
+
 [services.agent]
 name = "agent"
 startCommand = "python3 -u -m automation_engine.agent"
