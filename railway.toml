@@ -1,7 +1,26 @@
-[build]
-builder = "NIXPACKS"
-
 [deploy]
-healthcheckPath = "/health"
-restartPolicyType = "ON_FAILURE"
-restartPolicyMaxRetries = 10
+restartPolicyType = "always"
+
+
+# East Bay Automation Worker
+[[services]]
+name = "worker"
+
+[services.deploy]
+startCommand = "python3 -u -m automation_engine.worker"
+
+
+# East Bay Scheduler
+[[services]]
+name = "scheduler"
+
+[services.deploy]
+startCommand = "python3 -u -m automation_engine.scheduler"
+
+
+# East Bay AI Agent
+[[services]]
+name = "agent"
+
+[services.deploy]
+startCommand = "python3 -u -m automation_engine.agent"
