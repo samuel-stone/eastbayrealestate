@@ -47,8 +47,9 @@ if st.sidebar.button("⚡ Test & Start Local Model"):
         except Exception:
             st.sidebar.info("Running on High-Reliability Fallback Mode (Ollama offline).")
 
-# Main Tabs for Dashboard Organization (10 comprehensive tabs)
-tab_leads, tab_map, tab_scraper, tab_cmas, tab_architect, tab_notebooks, tab_proposals, tab_business, tab_labels, tab_history = st.tabs([
+# Main Tabs for Dashboard Organization (Agent History & Timeline moved to first position)
+tab_names = [
+    "📈 Agent History & Timeline",
     "📍 Permits & Leads", 
     "🗺️ Spatial Velocity Map",
     "🔄 Live Scraper",
@@ -57,9 +58,69 @@ tab_leads, tab_map, tab_scraper, tab_cmas, tab_architect, tab_notebooks, tab_pro
     "📓 Analytics Workstation", 
     "💡 AI Proposals",
     "📄 Business Proposals",
-    "🏷️ Direct Mail & Labels",
-    "📈 Agent History & Timeline"
-])
+    "🏷️ Direct Mail & Labels"
+]
+
+tabs = st.tabs(tab_names)
+tab_history, tab_leads, tab_map, tab_scraper, tab_cmas, tab_architect, tab_notebooks, tab_proposals, tab_business, tab_labels = tabs
+
+with tab_history:
+    st.subheader("📈 Agent History & Evolution Over Time")
+    st.markdown("Tracking automated code architect reviews, scraper executions, pipeline changes, and compiled analytics workbooks across commits.")
+
+    try:
+        query = """
+            SELECT id, observation, created_at 
+            FROM agent_memory 
+            ORDER BY created_at DESC 
+            LIMIT 50
+        """
+        with DatabasePool.get_connection() as conn:
+            df_mem = pd.read_sql(query, conn)
+        
+        if not df_mem.empty:
+            parsed_records = []
+            for _, row in df_mem.iterrows():
+                try:
+                    obs = json.loads(row['observation'])
+                    parsed_records.append({
+                        "ID": row['id'],
+                        "Time": row['created_at'],
+                        "Type": obs.get("type", "general"),
+                        "Title": obs.get("title", "AI Observation"),
+                        "Summary": obs.get("summary", str(obs))
+                    })
+                except Exception:
+                    parsed_records.append({
+                        "ID": row['id'],
+                        "Time": row['created_at'],
+                        "Type": "raw",
+                        "Title": "System Event",
+                        "Summary": str(row['observation'])
+                    })
+                    
+            df_history = pd.DataFrame(parsed_records)
+            
+            event_types = df_history["Type"].unique().tolist()
+            selected_type = st.selectbox("Filter by Report Type:", ["All"] + event_types)
+            
+            if selected_type != "All":
+                df_history = df_history[df_history["Type"] == selected_type]
+                
+            st.dataframe(
+                df_history[["Time", "Type", "Title", "Summary"]],
+                use_container_width=True,
+                hide_index=True
+            )
+            
+            st.markdown("### 📊 Activity Velocity")
+            df_history['Date'] = pd.to_datetime(df_history['Time']).dt.date
+            activity_counts = df_history.groupby('Date').size().reset_index(name='Reports Generated')
+            st.bar_chart(activity_counts.set_index('Date'))
+        else:
+            st.info("No agent memory records found yet. Run a scraper job or git commit to trigger activity logging!")
+    except Exception as e:
+        st.error(f"Could not load agent history from database: {e}")
 
 with tab_leads:
     st.subheader("Active Prospect Leads & Permit Velocity")
@@ -215,13 +276,13 @@ with tab_proposals:
     try:
         with DatabasePool.get_connection() as conn:
             df_props = pd.read_sql("""
-                SELECT id, observation, created_at, 
+                SELECT DISTINCT ON (observation->>'title') id, observation, created_at, 
                        COALESCE(status, 'pending') as status,
                        COALESCE(execution_output, '') as execution_output
                 FROM agent_memory 
                 WHERE observation LIKE '%proposal%' 
-                ORDER BY created_at DESC 
-                LIMIT 20
+                ORDER BY observation->>'title', created_at DESC 
+                LIMIT 10
             """, conn)
             
         if not df_props.empty:
@@ -342,61 +403,3 @@ with tab_labels:
                     file_name=csv_filename,
                     mime="text/csv"
                 )
-
-with tab_history:
-    st.subheader("📈 AI Agent History & Evolution Over Time")
-    st.markdown("Tracking automated code architect reviews, scraper executions, pipeline changes, and compiled analytics workbooks across commits.")
-
-    try:
-        query = """
-            SELECT id, observation, created_at 
-            FROM agent_memory 
-            ORDER BY created_at DESC 
-            LIMIT 50
-        """
-        with DatabasePool.get_connection() as conn:
-            df_mem = pd.read_sql(query, conn)
-        
-        if not df_mem.empty:
-            parsed_records = []
-            for _, row in df_mem.iterrows():
-                try:
-                    obs = json.loads(row['observation'])
-                    parsed_records.append({
-                        "ID": row['id'],
-                        "Time": row['created_at'],
-                        "Type": obs.get("type", "general"),
-                        "Title": obs.get("title", "AI Observation"),
-                        "Summary": obs.get("summary", str(obs))
-                    })
-                except Exception:
-                    parsed_records.append({
-                        "ID": row['id'],
-                        "Time": row['created_at'],
-                        "Type": "raw",
-                        "Title": "System Event",
-                        "Summary": str(row['observation'])
-                    })
-                    
-            df_history = pd.DataFrame(parsed_records)
-            
-            event_types = df_history["Type"].unique().tolist()
-            selected_type = st.selectbox("Filter by Report Type:", ["All"] + event_types)
-            
-            if selected_type != "All":
-                df_history = df_history[df_history["Type"] == selected_type]
-                
-            st.dataframe(
-                df_history[["Time", "Type", "Title", "Summary"]],
-                use_container_width=True,
-                hide_index=True
-            )
-            
-            st.markdown("### 📊 Activity Velocity")
-            df_history['Date'] = pd.to_datetime(df_history['Time']).dt.date
-            activity_counts = df_history.groupby('Date').size().reset_index(name='Reports Generated')
-            st.bar_chart(activity_counts.set_index('Date'))
-        else:
-            st.info("No agent memory records found yet. Run a scraper job or git commit to trigger activity logging!")
-    except Exception as e:
-        st.error(f"Could not load agent history from database: {e}")
