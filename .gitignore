@@ -27,7 +27,6 @@ config/__pycache__/
 scraper/__pycache__/
 scripts/__pycache__/
 railpack-plan.json
-railpack-plan.json
 .env
 sendgrid.env
 aiven_backup.sql
@@ -36,3 +35,8 @@ aiven_backup.sql
 __pycache__
 planning/
 permit_pdfs/
+
+# Python
+__pycache__/
+*.pyc
+*.bak
