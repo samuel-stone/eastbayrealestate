@@ -26,9 +26,21 @@ def load_permits(conn):
             p.permit_date
         FROM walnut_creek_permits p
         JOIN leads l
-            ON upper(trim(l.normalized_address))
-             =
-               upper(trim(p.clean_addr))
+            ON (
+                regexp_replace(upper(trim(l.normalized_address)), '[^A-Z0-9]', '', 'g')
+                =
+                regexp_replace(upper(trim(p.clean_addr)), '[^A-Z0-9]', '', 'g')
+            )
+            OR (
+                -- Fallback to match core street number and primary name tokens if suffixes differ
+                split_part(regexp_replace(upper(trim(l.normalized_address)), '[^A-Z0-9 ]', '', 'g'), ' ', 1)
+                =
+                split_part(regexp_replace(upper(trim(p.clean_addr)), '[^A-Z0-9 ]', '', 'g'), ' ', 1)
+                AND
+                split_part(regexp_replace(upper(trim(l.normalized_address)), '[^A-Z0-9 ]', '', 'g'), ' ', 2)
+                =
+                split_part(regexp_replace(upper(trim(p.clean_addr)), '[^A-Z0-9 ]', '', 'g'), ' ', 2)
+            )
         ON CONFLICT DO NOTHING;
     """)
 
