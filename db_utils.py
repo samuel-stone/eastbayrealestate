@@ -10,7 +10,8 @@ def get_db_connection():
 
 def upsert_lead(normalized_address, city, address, parcel_number, assessed_value, status="New"):
     """
-    Inserts a new lead or updates/ignores if the normalized_address already exists.
+    Inserts a new lead or updates existing if the normalized_address already exists,
+    preserving non-null existing data via COALESCE.
     """
     conn = get_db_connection()
     try:
@@ -22,7 +23,8 @@ def upsert_lead(normalized_address, city, address, parcel_number, assessed_value
                 ON CONFLICT (normalized_address) 
                 DO UPDATE SET 
                     last_seen_at = NOW(),
-                    assessed_value = EXCLUDED.assessed_value
+                    assessed_value = COALESCE(EXCLUDED.assessed_value, leads.assessed_value),
+                    parcel_number = COALESCE(EXCLUDED.parcel_number, leads.parcel_number)
                 RETURNING id;
                 """,
                 (normalized_address, city, address, parcel_number, assessed_value, status)
