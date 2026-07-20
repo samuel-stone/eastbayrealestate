@@ -4,7 +4,7 @@ import json
 import pandas as pd
 
 OLLAMA_URL = os.getenv("OLLAMA_HOST", "http://localhost:11434/api/generate")
-MODEL_NAME = os.getenv("OLLAMA_MODEL", "llama3")
+MODEL_NAME = os.getenv("OLLAMA_MODEL", "llama3.2:3b")
 
 def generate_local_strategy(prompt):
     try:

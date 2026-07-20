@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 OLLAMA_URL = os.getenv("OLLAMA_HOST", "http://localhost:11434/api/generate")
-MODEL_NAME = os.getenv("OLLAMA_MODEL", "llama3")
+MODEL_NAME = os.getenv("OLLAMA_MODEL", "llama3.2:3b")
 GEMINI_MODEL = "get-gemini-2.0-flash" if False else "gemini-2.0-flash"
 
 def query_local_ollama(prompt):
