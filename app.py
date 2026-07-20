@@ -228,14 +228,30 @@ with tab_scraper:
         st.session_state.scraper_logs = {}
 
     if st.button("🚀 Trigger Live Extraction Job"):
-        with st.spinner(f"Running scraper worker for {scraper_municipality}..."):
+        with st.spinner("Executing pipeline in background..."):
             try:
-                st.session_state.scraper_logs[scraper_municipality] = scraper_architect.run_live_scraper(scraper_municipality)
-                st.success("Extraction job completed successfully!")
-            except Exception as scraper_err:
-                st.session_state.scraper_logs[scraper_municipality] = f"[!] Extraction Error: {scraper_err}"
-                st.error(str(scraper_err))
-
+                # Spawns a background process so Streamlit doesn't lock up the database
+                result = subprocess.run(
+                    ["python3", "scripts/load_walnut_creek_permits.py"],
+                    capture_output=True,
+                    text=True,
+                    check=False
+                )
+                
+                # Check the output to see if it aborted due to the file lock
+                if "already running in another process" in result.stdout:
+                    st.warning("⚠️ The scraper is already actively running. Please wait for it to finish.")
+                elif result.returncode == 0:
+                    st.success("✅ Pipeline completed successfully.")
+                    with st.expander("View Logs"):
+                        st.code(result.stdout)
+                else:
+                    st.error("❌ Pipeline failed.")
+                    with st.expander("View Error Details"):
+                        st.code(result.stderr or result.stdout)
+                        
+            except Exception as e:
+                st.error(f"Failed to trigger scraper: {e}")
     if scraper_municipality in st.session_state.scraper_logs:
         st.text_area("Live Scraper Execution & Audit Logs", st.session_state.scraper_logs[scraper_municipality], height=200, key=f"log_{scraper_municipality}")
 

@@ -1,7 +1,8 @@
 import os
+import sys
+import fcntl
 import psycopg2
 from datetime import datetime, timedelta
-
 
 def load_permits(conn):
     print("Loading permit_details...")
@@ -26,28 +27,16 @@ def load_permits(conn):
             p.permit_date
         FROM walnut_creek_permits p
         JOIN leads l
-            ON (
-                regexp_replace(upper(trim(l.normalized_address)), '[^A-Z0-9]', '', 'g')
-                =
-                regexp_replace(upper(trim(p.clean_addr)), '[^A-Z0-9]', '', 'g')
-            )
-            OR (
-                -- Fallback to match core street number and primary name tokens if suffixes differ
-                split_part(regexp_replace(upper(trim(l.normalized_address)), '[^A-Z0-9 ]', '', 'g'), ' ', 1)
-                =
-                split_part(regexp_replace(upper(trim(p.clean_addr)), '[^A-Z0-9 ]', '', 'g'), ' ', 1)
-                AND
-                split_part(regexp_replace(upper(trim(l.normalized_address)), '[^A-Z0-9 ]', '', 'g'), ' ', 2)
-                =
-                split_part(regexp_replace(upper(trim(p.clean_addr)), '[^A-Z0-9 ]', '', 'g'), ' ', 2)
-            )
+            -- BOOM: Using the ultra-fast indexed columns
+            ON l.address_match_key = p.address_match_key
+            AND l.address_match_key IS NOT NULL
+            AND l.address_match_key != ''
         ON CONFLICT DO NOTHING;
     """)
 
     print("Permit rows inserted:", cur.rowcount)
 
     conn.commit()
-
     cur.close()
 
 
@@ -60,42 +49,26 @@ def update_features(conn):
         UPDATE prospect_features pf
         SET
             project_count = x.project_count,
-
-            building_permit_count_24m =
-                x.building_count,
-
-            planning_application_count_24m =
-                x.planning_count,
-
-            major_project_type =
-                x.major_project_type,
-
+            building_permit_count_24m = x.building_count,
+            planning_application_count_24m = x.planning_count,
+            major_project_type = x.major_project_type,
             updated_at = NOW()
-
         FROM (
-
             SELECT
                 l.id AS lead_id,
-
                 COUNT(pd.*) AS project_count,
-
                 COUNT(
                     CASE
-                        WHEN lower(pd.permit_type)
-                             LIKE '%building%'
+                        WHEN lower(pd.permit_type) LIKE '%building%'
                         THEN 1
                     END
                 ) AS building_count,
-
                 COUNT(
                     CASE
-                        WHEN lower(pd.permit_type)
-                             LIKE '%planning%'
+                        WHEN lower(pd.permit_type) LIKE '%planning%'
                         THEN 1
                     END
                 ) AS planning_count,
-
-
                 (
                     SELECT permit_type
                     FROM permit_details pd2
@@ -104,29 +77,29 @@ def update_features(conn):
                     ORDER BY COUNT(*) DESC
                     LIMIT 1
                 ) AS major_project_type
-
-
             FROM leads l
-
             JOIN permit_details pd
                 ON pd.lead_id = l.id
-
             GROUP BY l.id
-
         ) x
-
         WHERE pf.lead_id = x.lead_id;
-
     """)
 
     print("Prospect rows updated:", cur.rowcount)
 
     conn.commit()
-
     cur.close()
 
 
 def main():
+    lock_file_path = '/tmp/walnut_creek_loader.lock'
+    lock_file = open(lock_file_path, 'w')
+    
+    try:
+        fcntl.lockf(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        print("Pipeline is already running in another process. Aborting.")
+        sys.exit(0)
 
     print("""
 ===================================
@@ -150,6 +123,8 @@ Pipeline completed successfully.
 
     finally:
         conn.close()
+        fcntl.lockf(lock_file, fcntl.LOCK_UN)
+        lock_file.close()
 
 
 if __name__ == "__main__":
