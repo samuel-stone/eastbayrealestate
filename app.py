@@ -217,44 +217,111 @@ with tab_map:
 
 with tab_scraper:
     st.subheader("🔄 Live Municipal Permit & Marketplace Scraper Engine")
-    st.markdown("Trigger automated Playwright and API extraction jobs live against municipal portals, Zillow, and Redfin feeds.")
 
-    scraper_municipality = st.selectbox(
-        "Select Municipality or Marketplace Target", 
-        ["Walnut Creek", "Rossmoor", "Orinda", "Lafayette", "Zillow East Bay Comps", "Redfin Walnut Creek Feed"]
+    st.markdown(
+        """
+        Run individual extraction pipelines.
+        Each selection maps to a dedicated loader.
+        """
     )
-    
-    if "scraper_logs" not in st.session_state:
-        st.session_state.scraper_logs = {}
 
-    if st.button("🚀 Trigger Live Extraction Job"):
-        with st.spinner("Executing pipeline in background..."):
-            try:
-                # Spawns a background process so Streamlit doesn't lock up the database
-                result = subprocess.run(
-                    ["python3", "scripts/load_walnut_creek_permits.py"],
-                    capture_output=True,
-                    text=True,
-                    check=False
-                )
-                
-                # Check the output to see if it aborted due to the file lock
-                if "already running in another process" in result.stdout:
-                    st.warning("⚠️ The scraper is already actively running. Please wait for it to finish.")
-                elif result.returncode == 0:
-                    st.success("✅ Pipeline completed successfully.")
-                    with st.expander("View Logs"):
-                        st.code(result.stdout)
-                else:
-                    st.error("❌ Pipeline failed.")
-                    with st.expander("View Error Details"):
-                        st.code(result.stderr or result.stdout)
-                        
-            except Exception as e:
-                st.error(f"Failed to trigger scraper: {e}")
-    if scraper_municipality in st.session_state.scraper_logs:
-        st.text_area("Live Scraper Execution & Audit Logs", st.session_state.scraper_logs[scraper_municipality], height=200, key=f"log_{scraper_municipality}")
+    scraper_jobs = {
+        "Walnut Creek Permits": "scripts/load_walnut_creek_permits.py",
+        "Rossmoor Permits": "scripts/load_rossmoor_permits.py",
+        "Orinda Permits": "scripts/load_orinda_permits.py",
+        "Lafayette Permits": "scripts/load_lafayette_permits.py",
+        "Zillow East Bay Comps": "scripts/load_zillow_comps.py",
+        "Redfin Walnut Creek Feed": "scripts/load_redfin.py",
+    }
 
+
+    selected_scraper = st.selectbox(
+        "Select Extraction Pipeline",
+        list(scraper_jobs.keys())
+    )
+
+
+    selected_script = scraper_jobs[selected_scraper]
+
+
+    if st.button(
+        "🚀 Run Selected Pipeline",
+        key="live_scraper_button"
+    ):
+
+        if not os.path.exists(selected_script):
+
+            st.warning(
+                f"""
+{selected_scraper} is selected,
+but this loader does not exist yet:
+
+{selected_script}
+
+Create this script before running it.
+"""
+            )
+
+        else:
+
+            with st.spinner(
+                f"Running {selected_scraper}..."
+            ):
+
+                try:
+
+                    result = subprocess.run(
+                        [
+                            "python3",
+                            "-u",
+                            selected_script
+                        ],
+                        capture_output=True,
+                        text=True,
+                        timeout=900
+                    )
+
+
+                    output = (
+                        result.stdout
+                        +
+                        "\n"
+                        +
+                        result.stderr
+                    )
+
+
+                    if result.returncode == 0:
+
+                        st.success(
+                            f"✅ {selected_scraper} completed"
+                        )
+
+                    else:
+
+                        st.error(
+                            f"❌ {selected_scraper} failed"
+                        )
+
+
+                    with st.expander(
+                        "Execution Logs"
+                    ):
+                        st.code(output)
+
+
+                except subprocess.TimeoutExpired:
+
+                    st.error(
+                        "Pipeline exceeded 15 minute timeout."
+                    )
+
+
+                except Exception as e:
+
+                    st.error(
+                        f"Execution error: {e}"
+                    )
 with tab_cmas:
     st.subheader("📊 Comparable Market Analysis (CMA) Pricing Explorer")
     st.markdown("Analyze recent closed sales, square footage pricing, and active permit counts for comparative valuations.")
