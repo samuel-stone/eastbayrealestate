@@ -12,7 +12,7 @@ def generate_analytics_notebook():
     prompt = (
         "You are an expert Data Science Analytics Architect. "
         "Create a valid Jupyter Notebook JSON object (.ipynb format version 4) containing markdown and code cells "
-        "that connect to a PostgreSQL database using pandas and psycopg2, query real estate permit tables ('leads', 'prospect_features'), "
+        "that connect to a PostgreSQL database using psycopg2 and pandas (using os.environ.get('DATABASE_URL')), query real estate permit tables ('leads', 'prospect_features'), "
         "and build a Plotly visualization histogram or scatter plot. "
         "CRITICAL REQUIREMENT: Output ONLY valid raw JSON. Do not write any conversational text. "
         "If you use markdown code ticks, ensure they are stripped so the output is parseable by json.loads()."
@@ -43,7 +43,7 @@ def generate_analytics_notebook():
     except Exception as e:
         print(f"[-] LLM JSON generation error: {e}. Falling back to rich architected template.")
 
-    # Comprehensive fully-populated fallback notebook template if parsing fails
+    # Comprehensive fully-populated fallback notebook template with correct psycopg2 connection
     rich_fallback_nb = {
       "cells": [
        {
@@ -64,8 +64,9 @@ def generate_analytics_notebook():
          "import pandas as pd\n",
          "import psycopg2\n",
          "import plotly.express as px\n\n",
-         "# Establish connection to production database via environment variables\n",
-         "conn = psycopg2.connect(os.environ.get('DATABASE_URL'))\n",
+         "# Establish secure connection to production database via environment variables\n",
+         "db_url = os.environ.get('DATABASE_URL')\n",
+         "conn = psycopg2.connect(db_url)\n",
          "query = '''\n",
          "    SELECT l.address, l.city, l.status, \n",
          "           COALESCE(f.building_permit_count_24m, 0) as building_permit_count_24m,\n",
