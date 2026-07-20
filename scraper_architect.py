@@ -1,45 +1,39 @@
 import os
 import subprocess
-import random
 from datetime import datetime
 
 def run_live_scraper(municipality="Walnut Creek"):
-    """Actively triggers live Redfin, Zillow, or municipal permit scraping subprocesses for the specified target."""
+    """Actively triggers live extraction subprocesses or raises an explicit error if the script does not exist."""
     city_slug = municipality.lower().replace(" ", "_")
-    
-    log_output = f"[+] Initializing active real estate extraction job for {municipality}...\n"
     
     # Determine which targeted scraper to execute
     if "zillow" in city_slug or "redfin" in city_slug:
         target_script = f"scripts/scrape_{city_slug}.py"
     else:
-        # Default municipality permit or real estate scraper
-        target_script = f"scripts/scrape_permits.py"
+        target_script = "scripts/scrape_permits.py"
         
-    if os.path.exists(target_script):
-        try:
-            result = subprocess.run(
-                ["python3", target_script, "--target", municipality], 
-                capture_output=True, 
-                text=True, 
-                timeout=90
-            )
-            if result.returncode == 0:
-                log_output += f"[+] Successfully completed active execution for {municipality}.\n"
-                log_output += result.stdout if result.stdout else "[+] Records scraped successfully."
-            else:
-                log_output += f"[!] Scraper process exited with code {result.returncode}.\n"
-                log_output += result.stderr if result.stderr else "[!] Execution error encountered."
-        except subprocess.TimeoutExpired:
-            log_output += "[!] Scraper execution timed out after 90 seconds."
-        except Exception as e:
-            log_output += f"[!] Failed to spawn scraping worker: {e}"
-    else:
-        # Active simulation for Redfin/Zillow pipelines if script file is pending creation
-        count = random.randint(15, 45)
-        log_output += f"[+] Active Playwright Worker connected to {municipality} public listings feed.\n"
-        log_output += f"[+] Bypassing rate limits and parsing property comps, square footage pricing, and active permits.\n"
-        log_output += f"[+] Successfully extracted and synced {count} active listings/permits at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}."
+    if not os.path.exists(target_script):
+        raise FileNotFoundError(
+            f"Active scraper script for target '{municipality}' not found at `{target_script}`. "
+            "Simulation has been disabled per configuration. Please provision the target scraper script."
+        )
+        
+    log_output = f"[+] Initializing active extraction subprocess for {municipality} via `{target_script}`...\n"
+    
+    try:
+        result = subprocess.run(
+            ["python3", target_script, "--target", municipality], 
+            capture_output=True, 
+            text=True, 
+            timeout=90
+        )
+        if result.returncode == 0:
+            log_output += f"[+] Successfully completed active execution for {municipality}.\n"
+            log_output += result.stdout if result.stdout else "[+] Records scraped successfully."
+        else:
+            raise RuntimeError(f"Scraper process exited with code {result.returncode}: {result.stderr}")
+    except subprocess.TimeoutExpired:
+        raise TimeoutError(f"Scraper execution for {municipality} timed out after 90 seconds.")
         
     # Log execution to database
     try:
@@ -48,7 +42,7 @@ def run_live_scraper(municipality="Walnut Creek"):
             with conn.cursor() as cur:
                 cur.execute(
                     "INSERT INTO agent_memory (observation, created_at) VALUES (%s, NOW())",
-                    (f'{{"type": "scraper", "title": "Portal Scrape - {municipality}", "summary": "Active extraction completed"}}',)
+                    (f'{{"type": "scraper", "title": "Portal Scrape - {municipality}", "summary": "Active extraction executed successfully"}}',)
                 )
             conn.commit()
     except Exception:
