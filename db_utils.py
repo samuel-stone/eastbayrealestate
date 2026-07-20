@@ -7,24 +7,28 @@ def get_db_connection():
     if not db_url:
         raise ValueError("DATABASE_URL environment variable is not set!")
     return psycopg2.connect(db_url, connect_timeout=10)
-def upsert_scraped_property(property_address, price, category):
+
+def upsert_lead(normalized_address, city, address, parcel_number, assessed_value, status="New"):
     """
-    Inserts a scraped property or skips if the address already exists.
+    Inserts a new lead or updates/ignores if the normalized_address already exists.
     """
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO scraped_property_data (property_address, price, category, created_at)
-                VALUES (%s, %s, %s, NOW())
-                ON CONFLICT (property_address) DO NOTHING
+                INSERT INTO leads (normalized_address, city, address, parcel_number, assessed_value, status, first_seen_at, last_seen_at)
+                VALUES (%s, %s, %s, %s, %s, %s, NOW(), NOW())
+                ON CONFLICT (normalized_address) 
+                DO UPDATE SET 
+                    last_seen_at = NOW(),
+                    assessed_value = EXCLUDED.assessed_value
                 RETURNING id;
                 """,
-                (property_address, price, category)
+                (normalized_address, city, address, parcel_number, assessed_value, status)
             )
-            inserted_id = cur.fetchone()
+            lead_id = cur.fetchone()[0]
             conn.commit()
-            return inserted_id is not None
+            return lead_id
     finally:
         conn.close()

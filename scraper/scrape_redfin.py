@@ -8,6 +8,7 @@ print("LOADED scrape_redfin.py")
 from playwright.async_api import async_playwright
 
 from sqlalchemy import create_engine, text
+from db_utils import upsert_lead
 from dotenv import load_dotenv
 
 
@@ -145,69 +146,36 @@ def save_lead(
     url,
     note
 ):
+    address = data.get("address")
+    if not address:
+        return
+    
+    normalized_address = address.strip().lower()
+    city = data.get("city", "San Francisco")
+    parcel_number = data.get("parcel_number")
+    
+    price_val = data.get("price")
+    assessed_value = None
+    if price_val:
+        if isinstance(price_val, (int, float)):
+            assessed_value = float(price_val)
+        else:
+            cleaned = re.sub(r'[^0-9.]', '', str(price_val))
+            if cleaned:
+                assessed_value = float(cleaned)
 
-    with engine.begin() as conn:
-
-        conn.execute(
-            text(
-                """
-                INSERT INTO leads_sandbox
-                (
-                    address,
-                    price,
-                    beds,
-                    baths,
-                    sqft,
-                    last_source_url,
-                    last_notes,
-                    status
-                )
-
-                VALUES
-                (
-                    :address,
-                    :price,
-                    :beds,
-                    :baths,
-                    :sqft,
-                    :url,
-                    :notes,
-                    'new'
-                )
-                """
-            ),
-            {
-
-                "address":
-                    data.get("address"),
-
-
-                "price":
-                    data.get("price"),
-
-
-                "beds":
-                    data.get("beds"),
-
-
-                "baths":
-                    data.get("baths"),
-
-
-                "sqft":
-                    data.get("sqft"),
-
-
-                "url":
-                    url,
-
-
-                "notes":
-                    note
-
-            }
+    try:
+        upsert_lead(
+            normalized_address=normalized_address,
+            city=city,
+            address=address,
+            parcel_number=parcel_number,
+            assessed_value=assessed_value,
+            status="new"
         )
-
+        print(f"Upserted lead into production: {address}")
+    except Exception as e:
+        print(f"Upsert error for {address}: {e}")
 
 
 # --------------------------------------------------
