@@ -123,3 +123,22 @@ elif app_mode == "🧠 AI Code Base Architect & Feature Proposals":
             proposals, source = generate_proposals()
         st.success(f"Analysis generated successfully via {source}!")
         st.markdown(proposals)
+
+st.divider()
+st.subheader("📓 AI Analytics Architect & Notebook Generator")
+st.markdown("Have Llama architect and populate a custom Jupyter Notebook containing Pandas and Plotly pipelines for your live real estate database.")
+
+if st.button("Generate & Compile Jupyter Notebook"):
+    with st.spinner("Analytics Architect is writing and validating code..."):
+        import analytics_architect
+        notebook_filename = analytics_architect.generate_analytics_notebook()
+
+    st.success(f"Notebook successfully architected and populated: `{notebook_filename}`")
+
+    with open(notebook_filename, "rb") as f:
+        st.download_button(
+            label="📥 Download Generated Jupyter Notebook (.ipynb)",
+            data=f,
+            file_name=notebook_filename,
+            mime="application/json"
+        )

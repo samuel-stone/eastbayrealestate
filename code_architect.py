@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 OLLAMA_URL = os.getenv("OLLAMA_HOST", "http://localhost:11434/api/generate")
-MODEL_NAME = os.getenv("OLLAMA_MODEL", "llama3")
+MODEL_NAME = os.getenv("OLLAMA_MODEL", "llama3.2:3b")
 GEMINI_MODEL = "gemini-2.0-flash"
 
 def get_codebase_context():
@@ -18,7 +18,6 @@ def get_codebase_context():
         if os.path.exists(file):
             with open(file, 'r', encoding='utf-8') as f:
                 content = f.read()
-                # Include snippet or summary to keep token count optimal
                 context += f"\n--- FILE: {file} ---\n{content[:2500]}\n"
     return context
 
@@ -33,16 +32,19 @@ def generate_proposals():
         "Format with clear headings and actionable bullet points."
     )
 
-    # 1. Try Local Ollama first
+    # 1. Try Local Ollama first with extended timeout
     try:
         payload = {"model": MODEL_NAME, "prompt": prompt, "stream": False}
-        response = requests.post(OLLAMA_URL, json=payload, timeout=10)
+        print(f"[*] Querying local Ollama model '{MODEL_NAME}'...")
+        response = requests.post(OLLAMA_URL, json=payload, timeout=60)
         if response.status_code == 200:
             text = response.json().get("response")
             if text:
-                return text, "Local (Ollama / Llama3)"
-    except Exception:
-        pass
+                return text, "Local (Ollama / Llama3.2)"
+        else:
+            print(f"[-] Ollama returned status code {response.status_code}: {response.text}")
+    except Exception as e:
+        print(f"[-] Ollama exception caught: {e}")
 
     # 2. Escalate to Gemini API
     api_key = os.getenv('GEMINI_API_KEY')
