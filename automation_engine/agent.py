@@ -1,29 +1,16 @@
-import time
-import signal
+from automation_engine.environment import validate_environment
 
+import time
 from datetime import datetime
 
-from automation_engine.environment import validate_environment
-from automation_engine.agent_brain import analyze_system
+from automation_engine.analysis_engine import analyze_system
+from automation_engine.agent_actions import (
+    queue_job,
+    retry_failed_jobs
+)
 
 
 running = True
-
-
-def shutdown(signum, frame):
-
-    global running
-
-    print(
-        "Agent shutting down..."
-    )
-
-    running = False
-
-
-
-signal.signal(signal.SIGTERM, shutdown)
-signal.signal(signal.SIGINT, shutdown)
 
 
 
@@ -32,7 +19,7 @@ def main():
     validate_environment()
 
     print(
-        "East Bay Autonomous Agent Online"
+        "East Bay Agent online"
     )
 
 
@@ -40,29 +27,56 @@ def main():
 
         try:
 
-            report = analyze_system()
+            print(
+                "Agent heartbeat:",
+                datetime.now()
+            )
+
+
+            #
+            # Ask analysis engine what needs attention
+            #
+            analysis = analyze_system()
+
 
             print(
-                "Agent report generated. Check docs/ and planning/ directories."
+                "Agent analysis:",
+                analysis
             )
+
+
+            #
+            # Recover failed jobs
+            #
+            retry_failed_jobs()
+
+
+            #
+            # Queue jobs based on analysis
+            #
+            if isinstance(analysis, dict):
+
+                jobs = analysis.get(
+                    "jobs",
+                    []
+                )
+
+                for job in jobs:
+
+                    queue_job(
+                        job
+                    )
 
 
         except Exception as e:
 
             print(
-                "Agent failure:",
+                "AGENT ERROR:",
                 e
             )
 
 
-        time.sleep(
-            900
-        )
-
-
-    print(
-        "Agent stopped cleanly"
-    )
+        time.sleep(60)
 
 
 
