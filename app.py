@@ -2,6 +2,8 @@ import os
 import json
 import subprocess
 import hashlib
+import urllib.request
+import urllib.error
 import pandas as pd
 import streamlit as st
 import plotly.express as px
@@ -37,15 +39,31 @@ model_choice = st.sidebar.text_input("Active Local LLM", value=os.environ.get("O
 st.sidebar.markdown("---")
 st.sidebar.subheader("🤖 Local AI & Model Status")
 if st.sidebar.button("⚡ Test & Start Local Model"):
-    with st.spinner("Pinging local Ollama engine..."):
+    with st.spinner("Pinging local Ollama engine & API daemon..."):
+        service_active = False
+        
+        # Method 1: Check via HTTP API (most reliable for desktop Ollama app)
         try:
-            res = subprocess.run(["ollama", "list"], capture_output=True, text=True, timeout=5)
-            if res.returncode == 0:
-                st.sidebar.success("Ollama Engine is Active & Ready!")
-            else:
-                st.sidebar.warning("Ollama responded, but check service status.")
+            req = urllib.request.Request("http://localhost:11434/api/tags", method="GET")
+            with urllib.request.urlopen(req, timeout=3) as response:
+                if response.status == 200:
+                    service_active = True
         except Exception:
-            st.sidebar.info("Running on High-Reliability Fallback Mode (Ollama offline).")
+            pass
+            
+        # Method 2: Fallback check via CLI subprocess
+        if not service_active:
+            try:
+                res = subprocess.run(["ollama", "list"], capture_output=True, text=True, timeout=4)
+                if res.returncode == 0:
+                    service_active = True
+            except Exception:
+                pass
+                
+        if service_active:
+            st.sidebar.success(f"Ollama Engine is Active & Ready!\nTarget Model: `{model_choice}`")
+        else:
+            st.sidebar.error("Ollama service unreachable. Please ensure the Ollama app or daemon is running locally.")
 
 # Main Tabs for Dashboard Organization (Agent History & Timeline first)
 tab_names = [
