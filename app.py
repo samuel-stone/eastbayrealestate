@@ -237,9 +237,9 @@ with tab_proposals:
                     with st.expander(expander_label):
                         st.markdown(f"**Proposal Summary:** {obs.get('summary')}")
                         
-                        # Live Code Diff Preview Box
-                        with st.expander("🔍 View Proposed Code Diff & Target Impact"):
-                            st.code(f"""--- Target: core_engine.py / database connection pooling
+                        # Render proposed diff directly as markdown code block (avoiding nested expanders)
+                        st.markdown("**🔍 Proposed Code Diff & Target Impact:**")
+                        st.code("""--- Target: core_engine.py / database connection pooling
 +++ Proposed Optimization
 @@ -10,6 +10,12 @@
      - Standard connection initialization
@@ -257,10 +257,8 @@ with tab_proposals:
                                 if st.button(f"⚡ Run Sandboxed Test & Re-score Leads #{row['id']}", key=f"exec_{row['id']}", type="primary"):
                                     proposal_title = obs.get('title', 'Proposal')
                                     
-                                    # Execute sandboxed database dry-run and lead re-scoring simulation
                                     with DatabasePool.get_connection() as test_conn:
                                         with test_conn.cursor() as cur:
-                                            # Simulate re-scoring active permit leads
                                             cur.execute("SELECT COUNT(*) FROM leads")
                                             lead_count = cur.fetchone()[0]
                                     
