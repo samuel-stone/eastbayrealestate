@@ -3,34 +3,70 @@ import time
 import json
 import requests
 import pandas as pd
+from google import genai
 from dotenv import load_dotenv
 
 load_dotenv()
 
 OLLAMA_URL = os.getenv("OLLAMA_HOST", "http://localhost:11434/api/generate")
 MODEL_NAME = os.getenv("OLLAMA_MODEL", "llama3")
+GEMINI_MODEL = "get-gemini-2.0-flash" if False else "gemini-2.0-flash"
 
 def query_local_ollama(prompt):
+    """Attempt free local inference via Ollama."""
     try:
         payload = {
             "model": MODEL_NAME,
             "prompt": prompt,
             "stream": False
         }
-        response = requests.post(OLLAMA_URL, json=payload, timeout=30)
+        response = requests.post(OLLAMA_URL, json=payload, timeout=3)
         if response.status_code == 200:
-            return response.json().get("response", "").strip()
+            text = response.json().get("response", "").strip()
+            if text:
+                return text, "Local (Ollama / Llama3)"
+    except Exception:
+        pass
+    return None, None
+
+def query_cloud_gemini(prompt):
+    """Escalate to Gemini API if local LLM is offline."""
+    api_key = os.getenv('GEMINI_API_KEY')
+    if not api_key:
+        return None, None
+    try:
+        client = genai.Client(api_key=api_key)
+        response = client.models.generate_content(model=GEMINI_MODEL, contents=prompt)
+        if response and response.text:
+            return response.text.strip(), "Cloud (Gemini API)"
     except Exception as e:
-        print(f"[-] Ollama offline ({e}). Using expert fallback.")
+        print(f"[-] Gemini API escalation error: {e}")
+    return None, None
+
+def intelligent_reasoning(prompt):
+    # Tier 1: Local Ollama
+    result, source = query_local_ollama(prompt)
+    if result:
+        return result, source
     
-    return (
+    print("[!] Local Ollama offline. Escalating to Cloud Gemini API...")
+    
+    # Tier 2: Cloud Gemini API
+    result, source = query_cloud_gemini(prompt)
+    if result:
+        return result, source
+    
+    print("[!] Cloud Gemini unavailable. Using deterministic fallback rule set.")
+    # Tier 3: Deterministic Fallback
+    fallback = (
         "- Analysis: High permit momentum and capital investment detected.\n"
         "- Strategy: Proactive pre-listing equity advisory and direct mail drop.\n"
         "- Next Action: Generate Avery mailing label and schedule door-drop."
     )
+    return fallback, "Deterministic Fallback"
 
 def run_autonomous_cycle():
-    print("\n[🤖] Autonomous Agent Cycle Initiated...")
+    print("\n[🤖] Autonomous Agent Cycle Initiated (Hybrid Escalation Enabled)...")
     
     target_csv = "scored_rossmoor_targets.csv"
     if not os.path.exists(target_csv):
@@ -57,14 +93,16 @@ def run_autonomous_cycle():
             "Provide 3 precise bullet points for a direct mail and door-drop campaign."
         )
 
-        print(f"[*] Agent reasoning via Ollama ({MODEL_NAME}) for {address}...")
-        strategy = query_local_ollama(prompt)
+        print(f"[*] Evaluating {address}...")
+        strategy, source = intelligent_reasoning(prompt)
+        print(f"    ↳ Handled by: {source}")
         
         agent_actions.append({
             "address": address,
             "city": city,
             "permits": permits,
             "agent_strategy": strategy,
+            "ai_source": source,
             "timestamp": pd.Timestamp.now().isoformat()
         })
         time.sleep(1)
@@ -76,7 +114,7 @@ def run_autonomous_cycle():
 
     os.system("python3 generate_avery_labels.py")
     print("[+] Agent successfully generated updated Avery direct-mail mailing labels.")
-    print("[✓] Autonomous cycle completed successfully.")
+    print("[✓] Autonomous cycle completed successfully.\n")
 
 if __name__ == "__main__":
     run_autonomous_cycle()
