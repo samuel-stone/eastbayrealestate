@@ -1,26 +1,14 @@
 SCHEDULES = [
 
     {
-        "name":
-        "scrape_listings"
+        "name": "scrape_redfin",
+        "interval": 3600
     },
 
 
     {
-        "name":
-        "enrich_properties"
-    },
-
-
-    {
-        "name":
-        "analyze_market"
-    },
-
-
-    {
-        "name":
-        "generate_report"
+        "name": "daily_market_report",
+        "interval": 86400
     }
 
 ]

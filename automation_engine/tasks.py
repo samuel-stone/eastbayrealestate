@@ -3,19 +3,13 @@ import sys
 import os
 
 
-# --------------------------------------------------
-# TASK REGISTRY
-# --------------------------------------------------
-
 TASKS = {
-
 
     "scrape_redfin":
         [
             "-m",
             "scraper.scrape_redfin"
         ],
-
 
 
     "scrape_listings":
@@ -25,53 +19,16 @@ TASKS = {
         ],
 
 
-
-    "discover_listings":
-        [
-            "-m",
-            "scraper.discover_listings"
-        ],
-
-
-
-    "scrape_danville":
-        [
-            "-m",
-            "scraper.scrape_danville"
-        ],
-
-
-
-    "process_leads":
-        [
-            "-m",
-            "prospect_model.score_prospects"
-        ],
-
-
-
     "daily_market_report":
         [
             "run_reports.py"
-        ],
-
-
-
-    "scrape_zillow_redfin":
-        [
-            "scraper/scrape_zillow_redfin.py"
         ]
 
 }
 
 
 
-# --------------------------------------------------
-# EXECUTOR
-# --------------------------------------------------
-
 def run_task(job):
-
 
     name = job["name"]
 
@@ -83,20 +40,21 @@ def run_task(job):
         )
 
 
-
     command = [
-
         sys.executable
-
     ] + TASKS[name]
 
 
-
     print(
-        "EXECUTING:",
-        " ".join(command)
+        "RUNNING TASK:",
+        name
     )
 
+
+    print(
+        "COMMAND:",
+        " ".join(command)
+    )
 
 
     env = os.environ.copy()
@@ -118,13 +76,11 @@ def run_task(job):
     )
 
 
-
     if result.stdout:
 
         print(
             result.stdout
         )
-
 
 
     if result.stderr:
@@ -134,7 +90,6 @@ def run_task(job):
         )
 
 
-
     if result.returncode != 0:
 
         raise Exception(
@@ -142,8 +97,7 @@ def run_task(job):
         )
 
 
-
     print(
-        "SUCCESS:",
+        "TASK SUCCESS:",
         name
     )
