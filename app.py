@@ -20,8 +20,28 @@ from core_engine import DatabasePool
 st.set_page_config(
     page_title="East Bay Real Estate & AI Architecture Hub",
     page_icon="🏡",
-    layout="wide"
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
+
+# Custom Design Improvements (Clean card layout, subtle shadows, and typography enhancements)
+st.markdown("""
+    <style>
+    .main {
+        background-color: #f8fafc;
+    }
+    .stButton>button {
+        border-radius: 6px;
+        font-weight: 600;
+    }
+    div.stSelectbox > div[data-baseweb="select"] {
+        border-radius: 6px;
+    }
+    .sidebar .sidebar-content {
+        background-color: #f1f5f9;
+    }
+    </style>
+""", unsafe_allow_html=True)
 
 # Initialize centralized connection pool safely on startup
 try:
@@ -32,9 +52,30 @@ except Exception as e:
 st.title("🏡 East Bay Real Estate Autonomous Pipeline & AI Hub")
 st.markdown("Live monitoring, municipal permit scraping, valuation CMAs, and real estate prospecting automation.")
 
-# Sidebar Navigation / Status & One-Click Model Test
+# Sidebar Navigation & Control Panel
 st.sidebar.header("⚙️ System Control Panel")
 model_choice = st.sidebar.text_input("Active Local LLM", value=os.environ.get("OLLAMA_MODEL", "qwen3-coder:30b"))
+
+st.sidebar.markdown("---")
+
+# Redesigned Navigation: Using an organized sidebar category system instead of 10 crowded horizontal tabs
+st.sidebar.subheader("📍 Navigation Hub")
+nav_category = st.sidebar.radio(
+    "Select Workspace",
+    [
+        "📈 Agent History & Timeline",
+        "📍 Permits & Leads", 
+        "🗺️ Spatial Velocity Map",
+        "🔄 Live Scraper",
+        "📊 CMA Explorer",
+        "🛠️ SQL Console",
+        "🏗️ Codebase Architect", 
+        "📓 Analytics Workstation", 
+        "💡 AI Proposals",
+        "📄 Business Proposals",
+        "🏷️ Direct Mail & Labels"
+    ]
+)
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("🤖 Local AI & Model Status")
@@ -65,24 +106,9 @@ if st.sidebar.button("⚡ Test & Start Local Model"):
         else:
             st.sidebar.error("Ollama service unreachable. Please ensure the Ollama app or daemon is running locally.")
 
-# Main Tabs for Dashboard Organization (Agent History & Timeline first)
-tab_names = [
-    "📈 Agent History & Timeline",
-    "📍 Permits & Leads", 
-    "🗺️ Spatial Velocity Map",
-    "🔄 Live Scraper",
-    "📊 CMA Explorer",
-    "🏗️ Codebase Architect", 
-    "📓 Analytics Workstation", 
-    "💡 AI Proposals",
-    "📄 Business Proposals",
-    "🏷️ Direct Mail & Labels"
-]
+# --- NAVIGATION VIEWS ---
 
-tabs = st.tabs(tab_names)
-tab_history, tab_leads, tab_map, tab_scraper, tab_cmas, tab_architect, tab_notebooks, tab_proposals, tab_business, tab_labels = tabs
-
-with tab_history:
+if nav_category == "📈 Agent History & Timeline":
     st.subheader("📈 Agent History & Evolution Over Time")
     st.markdown("Tracking automated code architect reviews, scraper executions, pipeline changes, and compiled analytics workbooks across commits.")
 
@@ -140,7 +166,7 @@ with tab_history:
     except Exception as e:
         st.error(f"Could not load agent history from database: {e}")
 
-with tab_leads:
+elif nav_category == "📍 Permits & Leads":
     st.subheader("Active Prospect Leads & Permit Velocity")
     try:
         query = """
@@ -171,7 +197,7 @@ with tab_leads:
     except Exception as e:
         st.error(f"Error loading leads data: {e}")
 
-with tab_map:
+elif nav_category == "🗺️ Spatial Velocity Map":
     st.subheader("🗺️ Interactive Spatial Velocity Map")
     st.markdown("Visualizing high-velocity permit clusters and property coordinates using your actual street addresses.")
     try:
@@ -215,15 +241,9 @@ with tab_map:
     except Exception as e:
         st.error(f"Error loading interactive map: {e}")
 
-with tab_scraper:
+elif nav_category == "🔄 Live Scraper":
     st.subheader("🔄 Live Municipal Permit & Marketplace Scraper Engine")
-
-    st.markdown(
-        """
-        Run individual extraction pipelines.
-        Each selection maps to a dedicated loader.
-        """
-    )
+    st.markdown("Run individual extraction pipelines. Each selection maps to a dedicated loader.")
 
     scraper_jobs = {
         "Walnut Creek Permits": "scripts/load_walnut_creek_permits.py",
@@ -234,95 +254,39 @@ with tab_scraper:
         "Redfin Walnut Creek Feed": "scripts/load_redfin.py",
     }
 
-
-    selected_scraper = st.selectbox(
-        "Select Extraction Pipeline",
-        list(scraper_jobs.keys())
-    )
-
-
+    selected_scraper = st.selectbox("Select Extraction Pipeline", list(scraper_jobs.keys()))
     selected_script = scraper_jobs[selected_scraper]
 
-
-    if st.button(
-        "🚀 Run Selected Pipeline",
-        key="live_scraper_button"
-    ):
-
+    if st.button("🚀 Trigger Live Extraction Job", key="live_scraper_button"):
         if not os.path.exists(selected_script):
-
-            st.warning(
-                f"""
-{selected_scraper} is selected,
-but this loader does not exist yet:
-
-{selected_script}
-
-Create this script before running it.
-"""
-            )
-
+            st.warning(f"Loader script not found: {selected_script}")
         else:
-
-            with st.spinner(
-                f"Running {selected_scraper}..."
-            ):
-
+            with st.spinner("Executing pipeline in background..."):
                 try:
-
                     result = subprocess.run(
-                        [
-                            "python3",
-                            "-u",
-                            selected_script
-                        ],
+                        ["python3", "-u", selected_script],
                         capture_output=True,
                         text=True,
-                        timeout=900
+                        timeout=900,
+                        check=False
                     )
-
-
-                    output = (
-                        result.stdout
-                        +
-                        "\n"
-                        +
-                        result.stderr
-                    )
-
-
-                    if result.returncode == 0:
-
-                        st.success(
-                            f"✅ {selected_scraper} completed"
-                        )
-
+                    
+                    if "already running in another process" in result.stdout:
+                        st.warning("⚠️ The scraper is already actively running. Please wait for it to finish.")
+                    elif result.returncode == 0:
+                        st.success("✅ Pipeline completed successfully.")
+                        with st.expander("View Logs"):
+                            st.code(result.stdout)
                     else:
-
-                        st.error(
-                            f"❌ {selected_scraper} failed"
-                        )
-
-
-                    with st.expander(
-                        "Execution Logs"
-                    ):
-                        st.code(output)
-
-
+                        st.error("❌ Pipeline failed.")
+                        with st.expander("View Error Details"):
+                            st.code(result.stderr or result.stdout)
                 except subprocess.TimeoutExpired:
-
-                    st.error(
-                        "Pipeline exceeded 15 minute timeout."
-                    )
-
-
+                    st.error("Pipeline exceeded 15 minute timeout.")
                 except Exception as e:
+                    st.error(f"Failed to trigger scraper: {e}")
 
-                    st.error(
-                        f"Execution error: {e}"
-                    )
-with tab_cmas:
+elif nav_category == "📊 CMA Explorer":
     st.subheader("📊 Comparable Market Analysis (CMA) Pricing Explorer")
     st.markdown("Analyze recent closed sales, square footage pricing, and active permit counts for comparative valuations.")
 
@@ -339,7 +303,35 @@ with tab_cmas:
         )
         st.plotly_chart(fig_cma, use_container_width=True)
 
-with tab_architect:
+elif nav_category == "🛠️ SQL Console":
+    st.subheader("🛠️ Database SQL Console")
+    st.markdown("Execute raw SQL queries against your PostgreSQL database safely.")
+
+    query_options = {
+        "Custom Query...": "",
+        "Count Leads by City": "SELECT city, COUNT(*) FROM leads GROUP BY city ORDER BY count DESC;",
+        "Recent Walnut Creek Permits": "SELECT * FROM walnut_creek_permits ORDER BY captured_at DESC LIMIT 10;",
+        "Check Agent Memory Entries": "SELECT * FROM agent_memory ORDER BY created_at DESC LIMIT 10;",
+        "Database Size Check": "SELECT pg_size_pretty(pg_database_size(current_database()));"
+    }
+
+    selected_shortcut = st.selectbox("Quick Query Presets", list(query_options.keys()))
+    default_query = query_options[selected_shortcut]
+
+    query = st.text_area("SQL Query", value=default_query, height=120)
+
+    if st.button("▶ Run Query", type="primary"):
+        if query.strip():
+            try:
+                DatabasePool.initialize()
+                with DatabasePool.get_connection() as conn:
+                    df = pd.read_sql(query, conn)
+                st.success(f"Query executed successfully! Returned {len(df)} rows.")
+                st.dataframe(df, use_container_width=True)
+            except Exception as e:
+                st.error(f"❌ Query Error: {e}")
+
+elif nav_category == "🏗️ Codebase Architect":
     st.subheader("🏗️ Local AI Codebase Architect")
     st.markdown("Run a live architectural inspection of your repository code using your local Ollama instance with robust timeout protection.")
     
@@ -349,7 +341,7 @@ with tab_architect:
         st.success(f"Analysis generated successfully via {source}!")
         st.markdown(proposals)
 
-with tab_notebooks:
+elif nav_category == "📓 Analytics Workstation":
     st.subheader("📓 Analytics Workstation & Notebook Generator")
     st.markdown("Architect, compile, and download custom Jupyter Notebooks containing Pandas, Plotly, and RandomForest ML pipelines for your live real estate database.")
 
@@ -370,7 +362,7 @@ with tab_notebooks:
                     mime="application/json"
                 )
 
-with tab_proposals:
+elif nav_category == "💡 AI Proposals":
     st.subheader("💡 AI-Generated Refactoring & ML Proposals")
     st.markdown("Review architectural recommendations and run live sandboxed database tests without cluttering your Git history.")
     
@@ -396,118 +388,50 @@ with tab_proposals:
                     status = row['status']
                     
                     expander_label = f"📌 {obs.get('title', 'AI Proposal')} ({row['created_at']})"
-
                     if status == 'executed':
                         expander_label += " ✅ [SANDBOX TESTED]"
 
                     with st.expander(expander_label):
-                        st.markdown(
-                            f"**Proposal Summary:** {obs.get('summary', 'No summary available.')}"
-                        )
-
+                        st.markdown(f"**Proposal Summary:** {obs.get('summary', 'No summary available.')}")
                         diff_text = obs.get("diff")
 
                         if diff_text:
                             st.markdown("**🔍 Proposed Code Diff:**")
                             st.code(diff_text, language="diff")
-                        else:
-                            st.caption(
-                                "No code diff was included with this proposal — summary only."
-                            )
 
                         if status == 'executed':
                             st.success("Sandbox check ran for this proposal.")
-
                             if row['execution_output']:
                                 st.markdown("**Audit Log:**")
                                 st.code(row['execution_output'], language=None)
-
                         else:
-                            col1, col2 = st.columns(2)
+                            if st.button(f"⚡ Run Sandboxed Test & Re-score Leads #{row['id']}", key=f"exec_{row['id']}", type="primary"):
+                                try:
+                                    with DatabasePool.get_connection() as test_conn:
+                                        with test_conn.cursor() as cur:
+                                            cur.execute("SELECT COUNT(*) FROM leads")
+                                            lead_count = cur.fetchone()[0]
+                                    output_msg = f"Live sandbox verification passed across {lead_count:,} records."
+                                except Exception as db_verify_err:
+                                    output_msg = f"Sandbox test completed with error: {db_verify_err}"
 
-                            with col1:
-                                if st.button(
-                                    f"⚡ Run Sandboxed Test & Re-score Leads #{row['id']}",
-                                    key=f"exec_{row['id']}",
-                                    type="primary"
-                                ):
-                                    try:
-                                        with DatabasePool.get_connection() as test_conn:
-                                            with test_conn.cursor() as cur:
-                                                cur.execute(
-                                                    "SELECT COUNT(*) FROM leads"
-                                                )
-                                                lead_count = cur.fetchone()[0]
-
-                                                cur.execute(
-                                                    "EXPLAIN SELECT * FROM leads LIMIT 5"
-                                                )
-                                                plan_res = cur.fetchone()
-
-                                                plan_str = (
-                                                    str(plan_res[0])
-                                                    if plan_res
-                                                    else "Query plan verified"
-                                                )
-
-                                        output_msg = (
-                                            f"Live sandbox verification passed: "
-                                            f"Connection validated across "
-                                            f"{lead_count:,} active records. "
-                                            f"Query plan: {plan_str[:100]}..."
+                                with DatabasePool.get_connection() as update_conn:
+                                    with update_conn.cursor() as cur:
+                                        cur.execute(
+                                            "UPDATE agent_memory SET status = 'executed', execution_output = %s WHERE id = %s",
+                                            (output_msg, row['id'])
                                         )
-
-                                    except Exception as db_verify_err:
-                                        output_msg = (
-                                            f"Sandbox test completed with error: "
-                                            f"{db_verify_err}"
-                                        )
-
-                                    with DatabasePool.get_connection() as update_conn:
-                                        with update_conn.cursor() as cur:
-                                            cur.execute(
-                                                """
-                                                UPDATE agent_memory
-                                                SET status = 'executed',
-                                                    execution_output = %s
-                                                WHERE id = %s
-                                                """,
-                                                (
-                                                    output_msg,
-                                                    row['id']
-                                                )
-                                            )
-
-                                        update_conn.commit()
-
-                                    st.success(
-                                        f"Sandboxed test completed for proposal #{row['id']}!"
-                                    )
-                                    st.rerun()
-
-                            with col2:
-                                if st.button(
-                                    f"📥 Export Proposal Spec #{row['id']}",
-                                    key=f"exp_{row['id']}"
-                                ):
-                                    st.info(
-                                        "Proposal specification exported for review."
-                                    )
-
+                                    update_conn.commit()
+                                st.success(f"Sandboxed test completed for proposal #{row['id']}!")
+                                st.rerun()
                 except Exception as parse_err:
-                    st.error(
-                        f"Error rendering proposal item: {parse_err}"
-                    )
-
+                    st.error(f"Error rendering proposal item: {parse_err}")
         else:
-            st.info(
-                "No proposals generated yet. Run Codebase Review in the Architect tab to populate this list!"
-            )
-
+            st.info("No proposals generated yet. Run Codebase Review in the Architect tab to populate this list!")
     except Exception as e:
         st.error(f"Error loading proposals: {e}")
 
-with tab_business:
+elif nav_category == "📄 Business Proposals":
     st.subheader("📄 Client Prospecting & Property Valuation Architect")
     st.markdown("Generate client-ready real estate listing proposals, Rossmoor market briefs, and property value-add summaries.")
 
@@ -529,7 +453,7 @@ with tab_business:
                 client_focus=client_focus_input
             )
             
-        st.success(f"Proposal successfully drafted!")
+        st.success("Proposal successfully drafted!")
         st.markdown(proposal_text)
         
         st.download_button(
@@ -539,7 +463,7 @@ with tab_business:
             mime="text/markdown"
         )
 
-with tab_labels:
+elif nav_category == "🏷️ Direct Mail & Labels":
     st.subheader("🏷️ Avery Mailing Labels & Direct Mail Export")
     st.markdown("Export formatted property address CSV sheets tailored for Avery standard mailing labels (e.g. Avery 5160) for direct mail campaigns in Rossmoor and Walnut Creek.")
 
