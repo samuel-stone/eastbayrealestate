@@ -42,6 +42,11 @@ def main():
         "East Bay Automation Worker online"
     )
 
+    # --- ADD THESE 3 LINES ---
+    import subprocess
+    print("Verifying Playwright browser binaries...")
+    subprocess.run(["playwright", "install", "chromium"])
+    # -------------------------
 
     while running:
 

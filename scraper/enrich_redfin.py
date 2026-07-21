@@ -19,7 +19,6 @@ TARGET_DIR = "target_lists"
 
 def enrich_address(page, address):
     search_query = address.replace(" ", "+")
-    
     try:
         page.goto(f"https://www.redfin.com/stingray/do/lookup-location?location={search_query}")
         page.wait_for_selector(".summary-field", timeout=10000)
@@ -27,7 +26,6 @@ def enrich_address(page, address):
         raw_price = page.inner_text(".summary-field .price") if page.query_selector(".summary-field .price") else None
         status = page.inner_text(".home-status-indicator") if page.query_selector(".home-status-indicator") else "Off-Market"
         
-        # Clean the price string securely
         price = int(''.join(filter(str.isdigit, raw_price))) if raw_price else None
     except Exception as e:
         print(f"Extraction error for {address}: {e}")
@@ -36,31 +34,24 @@ def enrich_address(page, address):
     return {"address": address, "price": price, "status": status}
 
 def main():
+    os.makedirs(TARGET_DIR, exist_ok=True)
     csv_files = glob.glob(f"{TARGET_DIR}/*.csv")
+    
     if not csv_files:
-        print("No target lists found.")
+        print("[!] No target lists found in target_lists/ directory for enrichment.")
         return
 
-    # Grab proxy credentials from Railway environment variables
     PROXY_SERVER = os.environ.get("PROXY_SERVER")     
     PROXY_USERNAME = os.environ.get("PROXY_USERNAME")
     PROXY_PASSWORD = os.environ.get("PROXY_PASSWORD")
 
     launch_args = {
         "headless": True,
-        "args": [
-            "--no-sandbox", 
-            "--disable-setuid-sandbox", 
-            "--disable-dev-shm-usage"
-        ]
+        "args": ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"]
     }
 
     if PROXY_SERVER and PROXY_USERNAME and PROXY_PASSWORD:
-        launch_args["proxy"] = {
-            "server": PROXY_SERVER,
-            "username": PROXY_USERNAME,
-            "password": PROXY_PASSWORD
-        }
+        launch_args["proxy"] = {"server": PROXY_SERVER, "username": PROXY_USERNAME, "password": PROXY_PASSWORD}
         print("Residential proxy routing engaged for enrichment.")
 
     with Stealth().use_sync(sync_playwright()) as p:
@@ -72,9 +63,11 @@ def main():
         
         for file in csv_files:
             file_name = os.path.basename(file)
+            print(f"[*] Processing list: {file_name}")
             df = pd.read_csv(file)
             
             if 'address' not in df.columns:
+                print(f"[-] Missing 'address' column in {file_name}. Skipping.")
                 continue
 
             for _, row in df.iterrows():
@@ -89,11 +82,10 @@ def main():
                         "price": data["price"],
                         "notes": f"Status: {data['status']} (List: {file_name})"
                     })
-                
                 time.sleep(3)
                 
         browser.close()
+        print("[+] Redfin enrichment cycle completed.")
 
 if __name__ == "__main__":
-    os.makedirs(TARGET_DIR, exist_ok=True)
     main()

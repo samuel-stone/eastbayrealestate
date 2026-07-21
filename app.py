@@ -50,7 +50,7 @@ except Exception as e:
     st.error(f"Failed to initialize database connection pool: {e}")
 
 st.title("🏡 East Bay Real Estate Autonomous Pipeline & AI Hub")
-st.markdown("Live monitoring, municipal permit scraping, valuation CMAs, and real estate prospecting automation.")
+st.markdown("Live monitoring, municipal permit scraping, marketplace signal analysis, valuation CMAs, and real estate prospecting automation.")
 
 # Sidebar Navigation & Control Panel
 st.sidebar.header("⚙️ System Control Panel")
@@ -58,13 +58,14 @@ model_choice = st.sidebar.text_input("Active Local LLM", value=os.environ.get("O
 
 st.sidebar.markdown("---")
 
-# Redesigned Navigation: Using an organized sidebar category system instead of 10 crowded horizontal tabs
+# Navigation Hub
 st.sidebar.subheader("📍 Navigation Hub")
 nav_category = st.sidebar.radio(
     "Select Workspace",
     [
         "📈 Agent History & Timeline",
         "📍 Permits & Leads", 
+        "🔥 Motivated Sellers",
         "🗺️ Spatial Velocity Map",
         "🔄 Live Scraper",
         "📊 CMA Explorer",
@@ -82,8 +83,6 @@ st.sidebar.subheader("🤖 Local AI & Model Status")
 if st.sidebar.button("⚡ Test & Start Local Model"):
     with st.spinner("Pinging local Ollama engine & API daemon..."):
         service_active = False
-        
-        # Method 1: Check via HTTP API (most reliable for desktop Ollama app)
         try:
             req = urllib.request.Request("http://localhost:11434/api/tags", method="GET")
             with urllib.request.urlopen(req, timeout=3) as response:
@@ -92,7 +91,6 @@ if st.sidebar.button("⚡ Test & Start Local Model"):
         except Exception:
             pass
             
-        # Method 2: Fallback check via CLI subprocess
         if not service_active:
             try:
                 res = subprocess.run(["ollama", "list"], capture_output=True, text=True, timeout=4)
@@ -144,18 +142,13 @@ if nav_category == "📈 Agent History & Timeline":
                     })
                     
             df_history = pd.DataFrame(parsed_records)
-            
             event_types = df_history["Type"].unique().tolist()
             selected_type = st.selectbox("Filter by Report Type:", ["All"] + event_types)
             
             if selected_type != "All":
                 df_history = df_history[df_history["Type"] == selected_type]
                 
-            st.dataframe(
-                df_history[["Time", "Type", "Title", "Summary"]],
-                use_container_width=True,
-                hide_index=True
-            )
+            st.dataframe(df_history[["Time", "Type", "Title", "Summary"]], use_container_width=True, hide_index=True)
             
             st.markdown("### 📊 Activity Velocity")
             df_history['Date'] = pd.to_datetime(df_history['Time']).dt.date
@@ -183,19 +176,55 @@ elif nav_category == "📍 Permits & Leads":
         
         if not df_leads.empty:
             st.dataframe(df_leads, use_container_width=True, hide_index=True)
-            
             fig = px.bar(
-                df_leads.head(15), 
-                x='address', 
-                y='permits_24m', 
-                title='Top 15 Properties by 24-Month Permit Velocity',
-                color='permits_24m'
+                df_leads.head(15), x='address', y='permits_24m', 
+                title='Top 15 Properties by 24-Month Permit Velocity', color='permits_24m'
             )
             st.plotly_chart(fig, use_container_width=True)
         else:
             st.info("No lead data currently available in the database.")
     except Exception as e:
         st.error(f"Error loading leads data: {e}")
+
+elif nav_category == "🔥 Motivated Sellers":
+    st.subheader("🔥 Motivated Seller Intelligence Hub")
+    st.markdown("Ranked leads based on Redfin/Zillow marketplace signals: Price drops, high Days on Market (DOM), and deal fall-throughs.")
+
+    try:
+        query = """
+            SELECT l.address, l.city, 
+                   COALESCE(m.days_on_market, 0) as dom,
+                   COALESCE(m.current_price, 0) as price,
+                   COALESCE(m.price_drop_count, 0) as price_drops,
+                   COALESCE(m.seller_motivation_score, 0) as motivation_score,
+                   COALESCE(m.listing_status, 'Active') as status,
+                   m.deal_fell_through,
+                   m.is_fixer_or_tlc
+            FROM leads l
+            JOIN marketplace_signals m ON l.id = m.lead_id
+            ORDER BY motivation_score DESC, price_drops DESC
+            LIMIT 100
+        """
+        with DatabasePool.get_connection() as conn:
+            df_motivated = pd.read_sql(query, conn)
+            
+        if not df_motivated.empty:
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Tracked Motivated Leads", len(df_motivated))
+            col2.metric("Avg Days on Market", f"{int(df_motivated['dom'].mean())} days")
+            col3.metric("Deals Fell Through", int(df_motivated['deal_fell_through'].sum()))
+
+            st.dataframe(df_motivated, use_container_width=True, hide_index=True)
+            
+            fig_motivation = px.scatter(
+                df_motivated, x="dom", y="price_drops", size="motivation_score", color="city",
+                hover_name="address", title="Seller Motivation Matrix: Days on Market vs. Price Reductions"
+            )
+            st.plotly_chart(fig_motivation, use_container_width=True)
+        else:
+            st.info("No marketplace signals recorded yet. Run your Redfin ingestion pipeline to populate motivation metrics!")
+    except Exception as e:
+        st.info("Marketplace signals table not yet initialized. Run the migration script to enable full motivation scoring.")
 
 elif nav_category == "🗺️ Spatial Velocity Map":
     st.subheader("🗺️ Interactive Spatial Velocity Map")
@@ -214,14 +243,12 @@ elif nav_category == "🗺️ Spatial Velocity Map":
             
         if not df_map.empty:
             df_map['full_address'] = df_map['address'] + ", " + df_map['city'] + ", CA"
-            
             city_center_offsets = {
                 "Walnut Creek": (37.9101, -122.0652),
                 "Rossmoor": (37.8851, -122.0620),
                 "Lafayette": (37.8857, -122.1180),
                 "Orinda": (37.8771, -122.1797)
             }
-            
             lats, lons = [], []
             for _, row in df_map.iterrows():
                 base_lat, base_lon = city_center_offsets.get(row['city'], (37.8915, -122.0608))
@@ -242,49 +269,62 @@ elif nav_category == "🗺️ Spatial Velocity Map":
         st.error(f"Error loading interactive map: {e}")
 
 elif nav_category == "🔄 Live Scraper":
-    st.subheader("🔄 Live Municipal Permit & Marketplace Scraper Engine")
-    st.markdown("Run individual extraction pipelines. Each selection maps to a dedicated loader.")
+    st.subheader("🔄 Live Municipal Permit & Redfin Pipeline Engine")
+    st.markdown("Trigger modular Redfin extraction (`scrape_redfin.py`, `parse_redfin_html.py`, `enrich_redfin.py`) or municipal loaders.")
 
     scraper_jobs = {
-        "Walnut Creek Permits": "scripts/load_walnut_creek_permits.py",
-        "Rossmoor Permits": "scripts/load_rossmoor_permits.py",
-        "Orinda Permits": "scripts/load_orinda_permits.py",
-        "Lafayette Permits": "scripts/load_lafayette_permits.py",
-        "Zillow East Bay Comps": "scripts/load_zillow_comps.py",
-        "Redfin Walnut Creek Feed": "scripts/load_redfin.py",
+        "Redfin Full Pipeline (Scrape -> Parse -> Enrich)": "scrape_redfin",
+        "Redfin Scrape Only (scrape_redfin.py)": "redfin_scrape",
+        "Redfin Parse HTML Only (parse_redfin_html.py)": "redfin_parse",
+        "Redfin Enrich Only (enrich_redfin.py)": "redfin_enrich",
+        "Walnut Creek Permits": "load_walnut_creek_permits",
+        "Rossmoor Permits": "load_rossmoor_permits",
+        "Orinda Permits": "load_orinda_permits",
+        "Lafayette Permits": "load_lafayette_permits",
+        "Zillow East Bay Comps": "load_zillow_comps",
     }
 
-    selected_scraper = st.selectbox("Select Extraction Pipeline", list(scraper_jobs.keys()))
-    selected_script = scraper_jobs[selected_scraper]
+    selected_scraper_name = st.selectbox("Select Extraction / Pipeline Job", list(scraper_jobs.keys()))
+    task_name = scraper_jobs[selected_scraper_name]
 
-    if st.button("🚀 Trigger Live Extraction Job", key="live_scraper_button"):
-        if not os.path.exists(selected_script):
-            st.warning(f"Loader script not found: {selected_script}")
-        else:
-            with st.spinner("Executing pipeline in background..."):
-                try:
-                    result = subprocess.run(
-                        ["python3", "-u", selected_script],
-                        capture_output=True,
-                        text=True,
-                        timeout=900,
-                        check=False
+    col1, col2 = st.columns([1, 2])
+    with col1:
+        trigger_btn = st.button("🚀 Queue Pipeline Job", type="primary")
+
+    if trigger_btn:
+        try:
+            DatabasePool.initialize()
+            with DatabasePool.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        INSERT INTO jobs (name, status, created_at, attempts) 
+                        VALUES (%s, 'queued', NOW(), 0)
+                        """,
+                        (task_name,)
                     )
-                    
-                    if "already running in another process" in result.stdout:
-                        st.warning("⚠️ The scraper is already actively running. Please wait for it to finish.")
-                    elif result.returncode == 0:
-                        st.success("✅ Pipeline completed successfully.")
-                        with st.expander("View Logs"):
-                            st.code(result.stdout)
-                    else:
-                        st.error("❌ Pipeline failed.")
-                        with st.expander("View Error Details"):
-                            st.code(result.stderr or result.stdout)
-                except subprocess.TimeoutExpired:
-                    st.error("Pipeline exceeded 15 minute timeout.")
-                except Exception as e:
-                    st.error(f"Failed to trigger scraper: {e}")
+                conn.commit()
+            st.success(f"Successfully queued `{task_name}`! Your background worker will pick it up shortly.")
+        except Exception as e:
+            st.error(f"❌ Failed to queue job: {e}")
+
+    st.markdown("---")
+    st.markdown("### 📋 Recent Worker Queue Status")
+    try:
+        DatabasePool.initialize()
+        with DatabasePool.get_connection() as conn:
+            df_jobs = pd.read_sql("""
+                SELECT id, name, status, attempts, last_error, created_at, completed_at
+                FROM jobs 
+                ORDER BY created_at DESC 
+                LIMIT 15
+            """, conn)
+            if not df_jobs.empty:
+                st.dataframe(df_jobs, use_container_width=True, hide_index=True)
+            else:
+                st.info("No background jobs found in queue.")
+    except Exception as e:
+        st.info(f"Could not load job queue table: {e}")
 
 elif nav_category == "📊 CMA Explorer":
     st.subheader("📊 Comparable Market Analysis (CMA) Pricing Explorer")
@@ -310,9 +350,9 @@ elif nav_category == "🛠️ SQL Console":
     query_options = {
         "Custom Query...": "",
         "Count Leads by City": "SELECT city, COUNT(*) FROM leads GROUP BY city ORDER BY count DESC;",
+        "Recent Marketplace Signals": "SELECT * FROM marketplace_signals ORDER BY updated_at DESC LIMIT 10;",
         "Recent Walnut Creek Permits": "SELECT * FROM walnut_creek_permits ORDER BY captured_at DESC LIMIT 10;",
         "Check Agent Memory Entries": "SELECT * FROM agent_memory ORDER BY created_at DESC LIMIT 10;",
-        "Database Size Check": "SELECT pg_size_pretty(pg_database_size(current_database()));"
     }
 
     selected_shortcut = st.selectbox("Quick Query Presets", list(query_options.keys()))
@@ -342,25 +382,65 @@ elif nav_category == "🏗️ Codebase Architect":
         st.markdown(proposals)
 
 elif nav_category == "📓 Analytics Workstation":
-    st.subheader("📓 Analytics Workstation & Notebook Generator")
-    st.markdown("Architect, compile, and download custom Jupyter Notebooks containing Pandas, Plotly, and RandomForest ML pipelines for your live real estate database.")
+    st.subheader("📓 Advanced Analytics Workstation & Model Studio")
+    st.markdown("Build, query, and test analytical data models on your live East Bay real estate database.")
 
-    municipality_filter = st.selectbox("Select Municipality Focus:", ["Walnut Creek", "Orinda", "Lafayette", "Moraga", "Clayton"])
-    
-    if st.button("Generate & Compile Jupyter Notebook"):
-        with st.spinner("Analytics Architect is writing and validating code..."):
-            notebook_filename = analytics_architect.generate_analytics_notebook()
+    analysis_mode = st.selectbox("Select Analytics Engine", [
+        "Descriptive Lead Statistics", 
+        "Permit Concentration Heatmap Data", 
+        "Custom Pandas Query Runner"
+    ])
+
+    try:
+        DatabasePool.initialize()
+        with DatabasePool.get_connection() as conn:
+            df_full = pd.read_sql("""
+                SELECT l.id, l.address, l.city, l.status,
+                       COALESCE(f.building_permit_count_24m, 0) as permits_24m,
+                       COALESCE(f.project_count, 0) as projects
+                FROM leads l
+                LEFT JOIN prospect_features f ON l.id = f.lead_id
+            """, conn)
+
+        if analysis_mode == "Descriptive Lead Statistics":
+            st.markdown("### 📊 Statistical Breakdown of Active Leads")
+            if not df_full.empty:
+                st.dataframe(df_full.describe(), use_container_width=True)
+                
+                city_breakdown = df_full.groupby('city').agg(
+                    Total_Leads=('id', 'count'),
+                    Avg_Permits=('permits_24m', 'mean'),
+                    Total_Permits=('permits_24m', 'sum')
+                ).reset_index()
+                
+                st.markdown("### 🏙️ Municipal Summary Table")
+                st.dataframe(city_breakdown, use_container_width=True, hide_index=True)
+            else:
+                st.warning("No lead records available.")
+
+        elif analysis_mode == "Permit Concentration Heatmap Data":
+            st.markdown("### 📈 Permit Distribution Analysis")
+            if not df_full.empty:
+                fig_hist = px.histogram(df_full, x="permits_24m", color="city", barmode="group", title="Permit Count Distribution by Municipality")
+                st.plotly_chart(fig_hist, use_container_width=True)
+            else:
+                st.warning("No lead records available.")
+
+        elif analysis_mode == "Custom Pandas Query Runner":
+            st.markdown("### 🐍 Interactive Pandas DataFrame Operations")
+            st.caption("You have access to `df_full` containing all leads and features.")
             
-        st.success(f"Notebook successfully architected and populated: `{notebook_filename}`")
-        
-        if os.path.exists(notebook_filename):
-            with open(notebook_filename, "rb") as f:
-                st.download_button(
-                    label="📥 Download Compiled Jupyter Notebook (.ipynb)",
-                    data=f,
-                    file_name=notebook_filename,
-                    mime="application/json"
-                )
+            user_code = st.text_area("Enter Pandas Filtering Expression", value="df_full.sort_values(by='permits_24m', ascending=False).head(20)")
+            if st.button("Execute Pandas Expression"):
+                try:
+                    result_df = eval(user_code)
+                    st.success("Executed successfully!")
+                    st.dataframe(result_df, use_container_width=True)
+                except Exception as eval_err:
+                    st.error(f"❌ Evaluation Error: {eval_err}")
+
+    except Exception as e:
+        st.error(f"Analytics Workstation error connecting to database: {e}")
 
 elif nav_category == "💡 AI Proposals":
     st.subheader("💡 AI-Generated Refactoring & ML Proposals")
