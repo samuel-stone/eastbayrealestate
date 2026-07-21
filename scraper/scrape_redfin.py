@@ -21,7 +21,8 @@ DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 engine = create_engine(DATABASE_URL)
 
 try:
-    from scripts.parse_redfin_html import parse_listing
+    # FIXED: Updated 'scripts' to 'scraper' so it finds the file!
+    from scraper.parse_redfin_html import parse_listing
 except Exception as e:
     print("Parser unavailable:", e)
     parse_listing = None
