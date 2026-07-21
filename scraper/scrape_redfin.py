@@ -1,153 +1,114 @@
-import os
-import re
-import json
-import sys
 import asyncio
 import random
-print("LOADED scrape_redfin.py")
+import os
+import psycopg2
+from psycopg2.extras import RealDictCursor
 from playwright.async_api import async_playwright
-from sqlalchemy import create_engine, text
-from db_utils import upsert_lead
-from dotenv import load_dotenv
+from scraper.parse_redfin_html import parse_listing
 
-load_dotenv()
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-if not DATABASE_URL:
-    print("DATABASE_URL missing")
-    sys.exit(1)
-
-DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
-engine = create_engine(DATABASE_URL)
-
-try:
-    # FIXED: Updated 'scripts' to 'scraper' so it finds the file!
-    from scraper.parse_redfin_html import parse_listing
-except Exception as e:
-    print("Parser unavailable:", e)
-    parse_listing = None
-
+def get_db_connection():
+    return psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
 
 def get_tasks():
-    with engine.begin() as conn:
-        return conn.execute(text("""
-            SELECT id, payload FROM ai_tasks
-            WHERE task_type='scrape_listing' AND status='pending'
-            ORDER BY id LIMIT 20
-        """)).fetchall()
-
-
-def update_task(task_id, status):
-    with engine.begin() as conn:
-        conn.execute(text("UPDATE ai_tasks SET status=:status WHERE id=:id"), {"id": task_id, "status": status})
-
-
-def address_from_url(url):
-    match = re.search(r'/([^/]+)-\d{5}/home', url)
-    if not match: return None
-    return match.group(1).replace("-", " ").title()
-
-
-def save_lead(data, url, note):
-    address = data.get("address")
-    if not address: return
-    
-    normalized_address = address.strip().lower()
-    city = data.get("city", "Walnut Creek") # Defaulting for DB constraints
-    
-    price_val = data.get("price")
-    assessed_value = None
-    if price_val:
-        cleaned = re.sub(r'[^0-9.]', '', str(price_val))
-        if cleaned: assessed_value = float(cleaned)
-
+    """Fetch queued or pending scraping tasks from the database."""
+    conn = get_db_connection()
+    cur = conn.cursor()
     try:
-        # 1. Upsert into core leads table
-        upsert_lead(
-            normalized_address=normalized_address,
-            city=city,
-            address=address,
-            parcel_number=data.get("parcel_number"),
-            assessed_value=assessed_value,
-            status="Active"
-        )
-        print(f"[+] Upserted core lead: {address}")
-
-        # 2. Extract Lead ID and Upsert to Marketplace Signals table
-        with engine.begin() as conn:
-            res = conn.execute(text("SELECT id FROM leads WHERE address = :address AND city = :city"), {"address": address, "city": city}).fetchone()
-            if res:
-                lead_id = res[0]
-                dom = data.get("dom", 0)
-                price_drops = data.get("price_drops", 0)
-                is_fixer = data.get("is_fixer", False)
-                score = (price_drops * 25) + (dom // 2)
-
-                conn.execute(text("""
-                    INSERT INTO marketplace_signals (lead_id, days_on_market, current_price, price_drop_count, is_fixer_or_tlc, seller_motivation_score, updated_at)
-                    VALUES (:lead_id, :dom, :price, :price_drops, :is_fixer, :score, NOW())
-                    ON CONFLICT (lead_id) DO UPDATE 
-                    SET days_on_market = EXCLUDED.days_on_market,
-                        current_price = EXCLUDED.current_price,
-                        price_drop_count = EXCLUDED.price_drop_count,
-                        is_fixer_or_tlc = EXCLUDED.is_fixer_or_tlc,
-                        seller_motivation_score = EXCLUDED.seller_motivation_score,
-                        updated_at = NOW();
-                """), {
-                    "lead_id": lead_id, "dom": dom, "price": assessed_value or 0, 
-                    "price_drops": price_drops, "is_fixer": is_fixer, "score": score
-                })
-                print(f"[+] Upserted motivation signals for {address} (Score: {score})")
-
+        # Fetch tasks that need scraping
+        cur.execute("""
+            SELECT id, url, address 
+            FROM scraped_leads 
+            WHERE scraped_at IS NULL 
+            LIMIT 5;
+        """)
+        tasks = cur.fetchall()
+        return tasks
     except Exception as e:
-        print(f"[-] Upsert error for {address}: {e}")
-
-
-async def fetch_redfin(page, url):
-    print("OPENING PAGE")
-    try:
-        await page.goto(url, wait_until="domcontentloaded", timeout=60000)
-        await page.wait_for_timeout(5000)
-    except Exception as e:
-        print("PAGE ERROR:", e)
-        return None
-
-    html = await page.content()
-    if len(html) < 50000 or "Access Denied" in html:
-        print("HTML TOO SMALL OR BLOCKED")
-        return None
-    return html
-
+        print(f"[!] Error fetching tasks: {e}")
+        return []
+    finally:
+        cur.close()
+        conn.close()
 
 async def process(task, page):
-    task_id, payload = task.id, task.payload
-    if isinstance(payload, str):
-        payload = json.loads(payload)
-
-    url = payload.get("url")
+    task_id = task["id"]
+    url = task["url"]
     print(f"\nTASK: {task_id} | URL: {url}")
+    print("OPENING PAGE")
 
-    data = {"address": address_from_url(url), "price": None, "beds": None, "baths": None, "sqft": None, "dom": 0, "price_drops": 0, "is_fixer": False}
+    try:
+        await page.goto(url, timeout=60000, wait_until="domcontentloaded")
+        await asyncio.sleep(random.uniform(2, 4))
+        
+        html_content = await page.content()
+        
+        # Parse data using the modular helper
+        data = parse_listing(html_content, url)
+        
+        if not data:
+            print(f"[!] Failed to parse listing data for {url}")
+            return
 
-    html = await fetch_redfin(page, url)
-    if not html:
-        print("BLOCKED - leaving pending")
-        return
-
-    if parse_listing:
+        # Save to database with fallback insert/update logic
+        conn = get_db_connection()
+        cur = conn.cursor()
         try:
-            parsed = parse_listing(html, url)
-            if parsed: data.update(parsed)
-        except Exception as e:
-            print("PARSER ERROR:", e)
+            cur.execute("""
+                INSERT INTO properties (url, address, price, beds, baths, sqft, scraped_at)
+                VALUES (%s, %s, %s, %s, %s, %s, NOW())
+                ON CONFLICT (url) DO UPDATE SET
+                    price = EXCLUDED.price,
+                    beds = EXCLUDED.beds,
+                    baths = EXCLUDED.baths,
+                    sqft = EXCLUDED.sqft,
+                    scraped_at = NOW();
+            """, (
+                data.get("url"),
+                data.get("address"),
+                data.get("price"),
+                data.get("beds"),
+                data.get("baths"),
+                data.get("sqft")
+            ))
+            
+            # Mark lead as scraped
+            cur.execute("""
+                UPDATE scraped_leads 
+                SET scraped_at = NOW() 
+                WHERE id = %s;
+            """, (task_id,))
+            
+            conn.commit()
+            print(f"[+] Successfully scraped and saved: {data.get('address')}")
+            
+        except Exception as db_err:
+            conn.rollback()
+            # Fallback if ON CONFLICT constraint isn't present yet
+            try:
+                cur.execute("""
+                    INSERT INTO properties (url, address, price, beds, baths, sqft, scraped_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, NOW());
+                """, (
+                    data.get("url"),
+                    data.get("address"),
+                    data.get("price"),
+                    data.get("beds"),
+                    data.get("baths"),
+                    data.get("sqft")
+                ))
+                cur.execute("UPDATE scraped_leads SET scraped_at = NOW() WHERE id = %s;", (task_id,))
+                conn.commit()
+                print(f"[+] Successfully saved (fallback insert) for: {data.get('address')}")
+            except Exception as inner_err:
+                print(f"[-] Upsert error for {data.get('address', url)}: {inner_err}")
+        finally:
+            cur.close()
+            conn.close()
 
-    save_lead(data, url, "v8.0 Playwright Redfin scraper")
-    update_task(task_id, "completed")
-
-
-# --------------------------------------------------
-# MAIN
-# --------------------------------------------------
+    except Exception as e:
+        print(f"[!] Error processing page {url}: {e}")
 
 async def async_main():
     print("Starting Redfin Worker v8.0")
@@ -160,17 +121,9 @@ async def async_main():
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(
-        headless=True,
-            args=[
-                "--disable-blink-features=AutomationControlled",
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-accelerated-2d-canvas",
-                "--disable-gpu"
-            ]
-        )   
-        
+            headless=True,
+            args=["--disable-blink-features=AutomationControlled", "--no-sandbox"]
+        )
         context = await browser.new_context(
             viewport={"width": 1280, "height": 900},
             user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0 Safari/537.36"
@@ -183,13 +136,8 @@ async def async_main():
 
         await browser.close()
 
-# Synchronous wrapper for task_registry.py compatibility
 def main():
     asyncio.run(async_main())
-
-# --------------------------------------------------
-# ENTRYPOINT
-# --------------------------------------------------
 
 if __name__ == "__main__":
     print("CALLING MAIN")
