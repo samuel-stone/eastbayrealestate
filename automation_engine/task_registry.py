@@ -2,19 +2,18 @@ import importlib
 
 # Task Registry mapping task names to their respective python modules
 TASK_REGISTRY = {
-    # Modular Redfin Scripts (Updated to correct 'scraper' folder)
+    # Modular Redfin Scripts
     "redfin_scrape": "scraper.scrape_redfin",
-    "redfin_parse": "scraper.parse_redfin_html",
     "redfin_enrich": "scraper.enrich_redfin",
     
     # Full Redfin Pipeline (Sequential Execution)
+    # Note: parse_redfin_html is removed because scrape_redfin imports and runs it internally!
     "scrape_redfin": [
         "scraper.scrape_redfin",
-        "scraper.parse_redfin_html",
         "scraper.enrich_redfin"
     ],
     
-    # Municipal & Comps Loaders (Assuming these are actually in a scripts/ folder)
+    # Municipal & Comps Loaders
     "load_walnut_creek_permits": "scripts.load_walnut_creek_permits",
     "load_rossmoor_permits": "scripts.load_rossmoor_permits",
     "load_orinda_permits": "scripts.load_orinda_permits",
