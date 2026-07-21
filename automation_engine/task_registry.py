@@ -13,8 +13,9 @@ TASK_REGISTRY = {
 def get_task_module(task_name):
     return TASK_REGISTRY.get(task_name)
 
-def run_task(task_name):
+def run_task(job):
     """Dynamically loads and executes a task by its registered module path."""
+    task_name = job["name"]
     module_path = get_task_module(task_name)
     
     if not module_path:

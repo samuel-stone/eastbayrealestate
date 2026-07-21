@@ -104,7 +104,8 @@ def complete_job(job_id):
         UPDATE jobs
         SET
             status = 'completed',
-            completed_at = NOW()
+            completed_at = NOW(),
+            last_error = NULL
         WHERE id = %s
         """,
         (job_id,)
