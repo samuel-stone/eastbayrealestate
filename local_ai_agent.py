@@ -3,6 +3,7 @@ import requests
 import psycopg2
 import pandas as pd
 from datetime import datetime
+import json
 
 OLLAMA_URL = os.getenv("OLLAMA_HOST", "http://localhost:11434/api/generate")
 MODEL_NAME = os.getenv("OLLAMA_MODEL", "llama3.2:3b")
@@ -26,21 +27,30 @@ def generate_local_strategy(prompt):
 
     # Smart fallback simulation/cloud response if local LLM is missing
     return (
-        f"Smart Analytical Recommendation: Property displays high permit activity. "
-        f"Recommended Strategy: 1) Target direct mail focusing on local construction trends. "
-        f"2) Coordinate outreach emphasizing recent neighborhood development. "
-        f"3) Offer custom property analytics to capture seller intent."
+        "Smart Analytical Recommendation: Property displays high permit activity. "
+        "Recommended Strategy: 1) Target direct mail focusing on local construction trends. "
+        "2) Coordinate outreach emphasizing recent neighborhood development. "
+        "3) Offer custom property analytics to capture seller intent."
     )
 
 def log_agent_memory(lead_id, address, city, strategy):
-    """Saves the AI agent's observation directly into your database memory table."""
+    """Saves the AI agent's observation directly into your database memory table safely using JSON dict conversion."""
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        observation = f'{{"type": "lead_strategy", "lead_id": {lead_id}, "address": "{address}", "city": "{city}", "strategy": "{strategy}"}}'
+        
+        # Use structured JSON generation instead of manual f-string quoting to handle address apostrophes/quotes cleanly
+        observation_dict = {
+            "type": "lead_strategy",
+            "lead_id": lead_id,
+            "address": address,
+            "city": city,
+            "strategy": strategy
+        }
+        
         cur.execute(
-            "INSERT INTO agent_memory (observation, created_at) VALUES (%s, %s)",
-            (observation, datetime.now())
+            "INSERT INTO agent_memory (observation, created_at) VALUES (%s::jsonb, %s)",
+            (json.dumps(observation_dict), datetime.now())
         )
         conn.commit()
         cur.close()
@@ -89,5 +99,9 @@ def run_local_pipeline():
 
     print("[+] Successfully generated and stored smart AI lead strategies in database memory!")
 
-if __name__ == "__main__":
+def main():
+    """Entrypoint function expected by the task worker runner."""
     run_local_pipeline()
+
+if __name__ == "__main__":
+    main()
