@@ -1,5 +1,5 @@
 # Use the official Microsoft Playwright Python image
-FROM mcr.microsoft.com/playwright/python:v1.40.0-jammy
+FROM mcr.microsoft.com/playwright/python:v1.61.0-jammy
 
 # Install root SSL certificates so psycopg2 can verify Aiven
 RUN apt-get update && apt-get install -y ca-certificates
