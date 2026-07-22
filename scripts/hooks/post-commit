@@ -14,7 +14,3 @@ else
     PYTHON_BIN="python3"
 fi
 
-echo "[+] Triggering automated post-commit AI code reviewer..."
-$PYTHON_BIN -m automation_engine.code_reviewer
-
-echo "=== Post-Commit Reports & Proposals Logged to Agent Memory ==="
