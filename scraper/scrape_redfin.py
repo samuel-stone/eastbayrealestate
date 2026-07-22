@@ -62,11 +62,11 @@ async def process(task, page):
 
         html_content = await page.content()
 
-       data = parse_listing(
+        data = parse_listing(
             html_content,
             url,
             task["address"]
-)
+        )
 
         if not data:
             print(f"[!] Failed parsing {url}")
