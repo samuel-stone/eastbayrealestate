@@ -7,7 +7,7 @@ from core_engine import DatabasePool
 
 def generate_proposals():
     """Generates a focused, safe, and actionable architectural refactoring proposal via local Ollama API with extended timeout."""
-    target_model = os.environ.get("OLLAMA_MODEL", "qwen3-coder:30b")
+    target_model = os.environ.get("OLLAMA_MODEL", "llama3.2:3b")
     
     prompt = (
         "You are an expert Principal AI Software Architect. Provide a focused, safe, and strictly actionable "

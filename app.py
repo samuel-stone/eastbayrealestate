@@ -54,7 +54,7 @@ st.markdown("Live monitoring, municipal permit scraping, marketplace signal anal
 
 # Sidebar Navigation & Control Panel
 st.sidebar.header("⚙️ System Control Panel")
-model_choice = st.sidebar.text_input("Active Local LLM", value=os.environ.get("OLLAMA_MODEL", "qwen3-coder:30b"))
+model_choice = st.sidebar.text_input("Active Local LLM", value=os.environ.get("OLLAMA_MODEL", "llama3.2:3b"))
 
 st.sidebar.markdown("---")
 

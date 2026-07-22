@@ -3,7 +3,7 @@ from datetime import datetime
 
 def generate_business_proposal(target_city="Walnut Creek", client_focus="Rossmoor & Senior Living Infill"):
     """Generates a client-ready real estate prospecting and property valuation proposal tailored for mother's real estate business."""
-    model = os.environ.get("OLLAMA_MODEL", "qwen3-coder:30b")
+    model = os.environ.get("OLLAMA_MODEL", "llama3.2:3b")
     
     proposal_content = f"""# REAL ESTATE PROSPECTING & PROPERTY VALUE ANALYSIS
 **Target Area / Focus:** {target_city} ({client_focus})  
