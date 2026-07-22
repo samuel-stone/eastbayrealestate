@@ -4,6 +4,7 @@ import json
 import psycopg2
 from datetime import datetime
 
+
 ROOT = os.path.dirname(
     os.path.dirname(
         os.path.abspath(__file__)
@@ -11,6 +12,7 @@ ROOT = os.path.dirname(
 )
 
 sys.path.insert(0, ROOT)
+
 
 from automation_engine.code_reviewer import review_commit
 
@@ -20,7 +22,8 @@ from analytics_architect import generate_analytics_notebook
 
 def log_to_agent_memory(title, summary):
     """
-    Saves the auto-generated report directly into the live agent_memory table.
+    Saves auto-generated reports into agent_memory safely.
+    Uses json.dumps to prevent malformed JSON from AI-generated text.
     """
 
     database_url = os.environ.get("DATABASE_URL")
@@ -30,7 +33,11 @@ def log_to_agent_memory(title, summary):
         return
 
     try:
-        conn = psycopg2.connect(database_url)
+        conn = psycopg2.connect(
+            database_url,
+            connect_timeout=10
+        )
+
         cur = conn.cursor()
 
         observation = json.dumps(
@@ -38,7 +45,8 @@ def log_to_agent_memory(title, summary):
                 "type": "post_commit_report",
                 "title": title,
                 "summary": summary
-            }
+            },
+            ensure_ascii=False
         )
 
         cur.execute(
@@ -81,15 +89,17 @@ if __name__ == "__main__":
         "[+] Triggering automated post-commit reporting workflow..."
     )
 
-    #
-    # 1. Generate architecture proposals
-    #
+
+    # --------------------------------------------------
+    # 1. Generate AI architecture proposals
+    # --------------------------------------------------
+
     try:
         proposals, source = generate_proposals()
 
         log_to_agent_memory(
             f"Codebase Review ({source})",
-            proposals[:500].replace("\n", " ")
+            proposals[:1000]
         )
 
     except Exception as e:
@@ -98,9 +108,10 @@ if __name__ == "__main__":
         )
 
 
-    #
+    # --------------------------------------------------
     # 2. Generate analytics notebook
-    #
+    # --------------------------------------------------
+
     try:
         nb_file = generate_analytics_notebook()
 
@@ -115,9 +126,10 @@ if __name__ == "__main__":
         )
 
 
-    #
+    # --------------------------------------------------
     # 3. AI Code Review
-    #
+    # --------------------------------------------------
+
     try:
         print(
             "[+] Running AI Code Review..."
