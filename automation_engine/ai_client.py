@@ -1,13 +1,13 @@
 import os
 import time
 import random
-import google.generativeai as genai
-from google.api_core.exceptions import ResourceExhausted
+from google import genai
+from google.genai import errors
 import requests
 import json
 
-# Configure Gemini
-genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
+# Initialize the new Gemini Client
+gemini_client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
 
 def route_task(task_type: str) -> str:
     """
@@ -27,25 +27,31 @@ def ask_ai(prompt: str, task_type: str = "judgment_call", max_retries: int = 4):
     print(f"🧠 Routing task '{task_type}' to provider: {provider}")
     
     if provider == "gemini":
-        # Using Flash for a higher free tier RPM limit
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        
         # Exponential backoff loop
         for attempt in range(max_retries):
             try:
-                response = model.generate_content(prompt)
+                # New SDK syntax for generating content
+                response = gemini_client.models.generate_content(
+                    model='gemini-1.5-flash',
+                    contents=prompt
+                )
                 clean_text = response.text.replace("```json", "").replace("```", "").strip()
                 return clean_text
                 
-            except ResourceExhausted as e:
-                if attempt == max_retries - 1:
-                    print(f"❌ Gemini rate limit exceeded after {max_retries} retries.")
+            except errors.APIError as e:
+                # The new SDK wraps HTTP errors in APIError with a status code
+                if e.code == 429:
+                    if attempt == max_retries - 1:
+                        print(f"❌ Gemini rate limit exceeded after {max_retries} retries.")
+                        raise e
+                        
+                    # Calculate backoff time: 2^attempt + random jitter
+                    sleep_time = (2 ** attempt) + random.uniform(0, 1)
+                    print(f"⚠️ Rate limit hit (429). Retrying in {sleep_time:.2f} seconds...")
+                    time.sleep(sleep_time)
+                else:
+                    # Re-raise if it's a different API error (e.g., 400 Bad Request, 403 Auth)
                     raise e
-                    
-                # Calculate backoff time: 2^attempt + random jitter
-                sleep_time = (2 ** attempt) + random.uniform(0, 1)
-                print(f"⚠️ Rate limit hit (429). Retrying in {sleep_time:.2f} seconds...")
-                time.sleep(sleep_time)
                 
     elif provider == "ollama":
         url = "http://localhost:11434/api/generate"
