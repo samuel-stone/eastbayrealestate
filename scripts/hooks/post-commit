@@ -1,16 +1,20 @@
 #!/bin/bash
+# 5-minute debounce window to prevent post-commit hook spam during iterative saves.
 
-echo "=== Git Post-Commit Hook Triggered ==="
+LAST_RUN_FILE=".git/post_commit_last_run"
 
-if [ -f .env ]; then
-    export $(cat .env | grep -v '#' | xargs)
+if [ -f "$LAST_RUN_FILE" ]; then
+    LAST_RUN=$(stat -c %Y "$LAST_RUN_FILE" 2>/dev/null || stat -f %m "$LAST_RUN_FILE")
+    NOW=$(date +%s)
+    DIFF=$((NOW - LAST_RUN))
+    
+    if [ "$DIFF" -lt 300 ]; then
+        echo "⏭️  Skipping AI review: Last run was less than 5 minutes ago."
+        exit 0
+    fi
 fi
 
-if [ -d ".venv" ]; then
-    PYTHON_BIN=".venv/bin/python"
-elif [ -d "venv" ]; then
-    PYTHON_BIN="venv/bin/python"
-else
-    PYTHON_BIN="python3"
-fi
+touch "$LAST_RUN_FILE"
 
+echo "🚀 Triggering AI code review pipeline..."
+python scripts/run_post_commit_reports.py &
