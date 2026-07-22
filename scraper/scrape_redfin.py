@@ -8,137 +8,234 @@ from scraper.parse_redfin_html import parse_listing
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
+
 def get_db_connection():
-    return psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+    return psycopg2.connect(
+        DATABASE_URL,
+        cursor_factory=RealDictCursor
+    )
 
 def get_tasks():
-    """Fetch queued or pending scraping tasks from the database."""
     conn = get_db_connection()
     cur = conn.cursor()
+
     try:
-        # Fetch tasks that need scraping
         cur.execute("""
-            SELECT id, url, address 
-            FROM scraped_leads 
-            WHERE scraped_at IS NULL 
+            SELECT
+                id,
+                address,
+                url
+            FROM redfin_scrape_queue
             LIMIT 5;
         """)
-        tasks = cur.fetchall()
-        return tasks
+
+        return cur.fetchall()
+
     except Exception as e:
         print(f"[!] Error fetching tasks: {e}")
         return []
+
     finally:
         cur.close()
         conn.close()
 
 async def process(task, page):
+
     task_id = task["id"]
     url = task["url"]
+
+    if url.endswith(".zip"):
+        print(f"[!] Skipping non-Redfin URL: {url}")
+        return
+
     print(f"\nTASK: {task_id} | URL: {url}")
     print("OPENING PAGE")
 
     try:
-        await page.goto(url, timeout=60000, wait_until="domcontentloaded")
+        await page.goto(
+            url,
+            timeout=60000,
+            wait_until="domcontentloaded"
+        )
+
         await asyncio.sleep(random.uniform(2, 4))
-        
+
         html_content = await page.content()
-        
-        # Parse data using the modular helper
-        data = parse_listing(html_content, url)
-        
+
+        data = parse_listing(
+            html_content,
+            url
+        )
+
         if not data:
-            print(f"[!] Failed to parse listing data for {url}")
+            print(f"[!] Failed parsing {url}")
             return
 
-        # Save to database with fallback insert/update logic
+
         conn = get_db_connection()
         cur = conn.cursor()
+
         try:
+
             cur.execute("""
-                INSERT INTO properties (url, address, price, beds, baths, sqft, scraped_at)
-                VALUES (%s, %s, %s, %s, %s, %s, NOW())
-                ON CONFLICT (url) DO UPDATE SET
+                INSERT INTO properties (
+                    address,
+                    url,
+                    price,
+                    beds,
+                    baths,
+                    sqft,
+                    dom,
+                    price_drops,
+                    is_fixer,
+                    last_scraped_at
+                )
+                VALUES (
+                    %s,%s,%s,%s,%s,%s,%s,%s,%s,NOW()
+                )
+
+                ON CONFLICT (address)
+                DO UPDATE SET
+                    url = EXCLUDED.url,
                     price = EXCLUDED.price,
                     beds = EXCLUDED.beds,
                     baths = EXCLUDED.baths,
                     sqft = EXCLUDED.sqft,
-                    scraped_at = NOW();
+                    dom = EXCLUDED.dom,
+                    price_drops = EXCLUDED.price_drops,
+                    is_fixer = EXCLUDED.is_fixer,
+                    last_scraped_at = NOW();
             """, (
-                data.get("url"),
+
                 data.get("address"),
+                data.get("url"),
                 data.get("price"),
                 data.get("beds"),
                 data.get("baths"),
-                data.get("sqft")
+                data.get("sqft"),
+                data.get("dom"),
+                data.get("price_drops"),
+                data.get("is_fixer")
+
             ))
-            
-            # Mark lead as scraped
+
+
             cur.execute("""
-                UPDATE scraped_leads 
-                SET scraped_at = NOW() 
+                UPDATE leads
+                SET property_id = (
+                    SELECT id
+                    FROM properties
+                    WHERE address = %s
+                )
                 WHERE id = %s;
-            """, (task_id,))
-            
+            """, (
+                data.get("address"),
+                task_id
+            ))
+
+
             conn.commit()
-            print(f"[+] Successfully scraped and saved: {data.get('address')}")
-            
-        except Exception as db_err:
+
+            print(
+                f"[+] Saved property: {data.get('address')}"
+            )
+
+
+        except Exception as db_error:
+
             conn.rollback()
-            # Fallback if ON CONFLICT constraint isn't present yet
-            try:
-                cur.execute("""
-                    INSERT INTO properties (url, address, price, beds, baths, sqft, scraped_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, NOW());
-                """, (
-                    data.get("url"),
-                    data.get("address"),
-                    data.get("price"),
-                    data.get("beds"),
-                    data.get("baths"),
-                    data.get("sqft")
-                ))
-                cur.execute("UPDATE scraped_leads SET scraped_at = NOW() WHERE id = %s;", (task_id,))
-                conn.commit()
-                print(f"[+] Successfully saved (fallback insert) for: {data.get('address')}")
-            except Exception as inner_err:
-                print(f"[-] Upsert error for {data.get('address', url)}: {inner_err}")
+
+            print(
+                f"[-] Database error: {db_error}"
+            )
+
+
         finally:
+
             cur.close()
             conn.close()
 
+
     except Exception as e:
-        print(f"[!] Error processing page {url}: {e}")
+
+        print(
+            f"[!] Error processing {url}: {e}"
+        )
+
 
 async def async_main():
-    print("Starting Redfin Worker v8.0")
+
+    print("Starting Redfin Worker v9.0")
+
     tasks = get_tasks()
-    print("Pending:", len(tasks))
+
+    print(
+        "Pending:",
+        len(tasks)
+    )
+
 
     if not tasks:
+
         print("Complete")
         return
 
+
     async with async_playwright() as p:
+
         browser = await p.chromium.launch(
             headless=True,
-            args=["--disable-blink-features=AutomationControlled", "--no-sandbox"]
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--no-sandbox"
+            ]
         )
+
+
         context = await browser.new_context(
-            viewport={"width": 1280, "height": 900},
-            user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0 Safari/537.36"
+            viewport={
+                "width":1280,
+                "height":900
+            },
+
+            user_agent=(
+                "Mozilla/5.0 "
+                "(Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 "
+                "(KHTML, like Gecko) "
+                "Chrome/127 Safari/537.36"
+            )
         )
+
+
         page = await context.new_page()
 
+
         for task in tasks:
-            await process(task, page)
-            await asyncio.sleep(random.uniform(3, 6))
+
+            await process(
+                task,
+                page
+            )
+
+            await asyncio.sleep(
+                random.uniform(3,6)
+            )
+
 
         await browser.close()
 
+
+
 def main():
-    asyncio.run(async_main())
+
+    asyncio.run(
+        async_main()
+    )
+
 
 if __name__ == "__main__":
+
     print("CALLING MAIN")
+
     main()
