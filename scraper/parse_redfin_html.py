@@ -1,57 +1,225 @@
-import re
+import asyncio
+import random
+import os
+import psycopg2
 
-def clean_number(value):
-    if not value:
-        return None
-    value = value.replace(",", "")
-    nums = re.findall(r'\d+\.?\d*', value)
-    if nums:
-        return float(nums[0])
-    return None
+from psycopg2.extras import RealDictCursor
+from playwright.async_api import async_playwright
 
-def parse_listing(html, url):
-    result = {
-        "url": url,
-        "address": None,
-        "price": None,
-        "beds": None,
-        "baths": None,
-        "sqft": None,
-        "dom": 0,
-        "price_drops": 0,
-        "is_fixer": False
-    }
+from scraper.parse_redfin_html import parse_listing
 
-    # ADDRESS
-    address = re.search(r'(\d+\s+[A-Za-z0-9\s]+,\s*[A-Za-z]+,\s*[A-Z]{2}\s+\d{5})', html)
-    if address:
-        result["address"] = address.group(1).split(",")[0]
 
-    # PRICE
-    price = re.search(r'\$([\d,]+)', html)
-    if price:
-        result["price"] = clean_number(price.group(1))
+DATABASE_URL = os.getenv("DATABASE_URL")
 
-    # BEDS & BATHS
-    beds = re.search(r'(\d+)\s*bd', html)
-    if beds: result["beds"] = float(beds.group(1))
 
-    baths = re.search(r'(\d+\.?\d*)\s*ba', html)
-    if baths: result["baths"] = float(baths.group(1))
+def get_db_connection():
+    return psycopg2.connect(
+        DATABASE_URL,
+        cursor_factory=RealDictCursor
+    )
 
-    # SQFT
-    sqft = re.search(r'([\d,]+)\s*sq\s*ft', html, re.I)
-    if sqft: result["sqft"] = clean_number(sqft.group(1))
 
-    # MARKETPLACE SIGNALS (DOM & Price Drops)
-    dom_match = re.search(r'(\d+)\s+days?\s+on\s+market', html, re.I)
-    if dom_match: result["dom"] = int(dom_match.group(1))
+def get_tasks():
 
-    price_drop_match = re.search(r'(Price drop|Price reduced).*?\$([\d,]+)', html, re.I)
-    if price_drop_match: result["price_drops"] = 1
+    conn = get_db_connection()
+    cur = conn.cursor()
 
-    # KEYWORD FLAGS (Fixer, TLC, Investor)
-    if re.search(r'(fixer|needs tlc|as-is|investor special|handyman)', html, re.I):
-        result["is_fixer"] = True
+    try:
 
-    return result
+        cur.execute("""
+            SELECT
+                id,
+                address,
+                url
+            FROM redfin_scrape_queue
+            WHERE status IS NULL
+               OR status = 'queued'
+            ORDER BY id
+            LIMIT 5;
+        """)
+
+        tasks = cur.fetchall()
+
+        if tasks:
+
+            ids = [task["id"] for task in tasks]
+
+            cur.execute("""
+                UPDATE redfin_scrape_queue
+                SET
+                    status = 'running',
+                    started_at = NOW()
+                WHERE id = ANY(%s);
+            """, (ids,))
+
+            conn.commit()
+
+        return tasks
+
+
+    except Exception as e:
+
+        print(f"[!] Error fetching tasks: {e}")
+        return []
+
+
+    finally:
+
+        cur.close()
+        conn.close()
+
+
+
+def update_queue_status(task_id, status, error=None):
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+
+        cur.execute("""
+            UPDATE redfin_scrape_queue
+            SET
+                status = %s,
+                last_error = %s,
+                completed_at =
+                    CASE
+                        WHEN %s = 'completed'
+                        THEN NOW()
+                        ELSE completed_at
+                    END
+            WHERE id = %s;
+        """, (
+            status,
+            error,
+            status,
+            task_id
+        ))
+
+        conn.commit()
+
+
+    except Exception as e:
+
+        print(
+            f"[!] Queue update failed: {e}"
+        )
+
+
+    finally:
+
+        cur.close()
+        conn.close()
+
+
+
+async def process(task, page):
+
+    task_id = task["id"]
+    url = task["url"]
+
+    if "redfin.com" not in url:
+
+        print(
+            f"[!] Skipping non-Redfin URL: {url}"
+        )
+
+        update_queue_status(
+            task_id,
+            "failed",
+            "Non-Redfin URL"
+        )
+
+        return
+
+
+    print(
+        f"\nTASK {task_id}"
+    )
+
+    print(
+        f"URL: {url}"
+    )
+
+
+    try:
+
+        await page.goto(
+            url,
+            timeout=60000,
+            wait_until="domcontentloaded"
+        )
+
+
+        await asyncio.sleep(
+            random.uniform(3,5)
+        )
+
+
+        html_content = await page.content()
+
+
+        data = parse_listing(
+            html_content,
+            url,
+            task["address"]
+        )
+
+
+        if not data:
+
+            print(
+                f"[!] Failed parsing {url}"
+            )
+
+            update_queue_status(
+                task_id,
+                "failed",
+                "Parser returned no data"
+            )
+
+            return
+
+
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+
+        try:
+
+            cur.execute("""
+                INSERT INTO properties
+                (
+                    address,
+                    url,
+                    price,
+                    beds,
+                    baths,
+                    sqft,
+                    dom,
+                    price_drops,
+                    is_fixer,
+                    last_scraped_at
+                )
+
+                VALUES
+                (
+                    %s,%s,%s,%s,%s,%s,%s,%s,%s,NOW()
+                )
+
+                ON CONFLICT(address)
+
+                DO UPDATE SET
+
+                    url = EXCLUDED.url,
+                    price = EXCLUDED.price,
+                    beds = EXCLUDED.beds,
+                    baths = EXCLUDED.baths,
+                    sqft = EXCLUDED.sqft,
+                    dom = EXCLUDED.dom,
+                    price_drops = EXCLUDED.price_drops,
+                    is_fixer = EXCLUDED.is_fixer,
+                    last_scraped_at = NOW();
+
+            """, (
