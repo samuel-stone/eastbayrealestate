@@ -1,4 +1,5 @@
 #!/bin/bash
+
 echo "=== Git Post-Commit Hook Triggered ==="
 
 if [ -f .env ]; then
@@ -13,10 +14,7 @@ else
     PYTHON_BIN="python3"
 fi
 
-echo "[+] Triggering automated post-commit reporting workflow..."
-$PYTHON_BIN scripts/run_post_commit_reports.py
-
-echo "[+] Generating autonomous AI improvement proposals..."
-$PYTHON_BIN scripts/generate_ai_proposals.py
+echo "[+] Triggering automated post-commit AI code reviewer..."
+$PYTHON_BIN -m automation_engine.code_reviewer
 
 echo "=== Post-Commit Reports & Proposals Logged to Agent Memory ==="
