@@ -1,0 +1,22 @@
+#!/bin/bash
+echo "=== Git Post-Commit Hook Triggered ==="
+
+if [ -f .env ]; then
+    export $(cat .env | grep -v '#' | xargs)
+fi
+
+if [ -d ".venv" ]; then
+    PYTHON_BIN=".venv/bin/python"
+elif [ -d "venv" ]; then
+    PYTHON_BIN="venv/bin/python"
+else
+    PYTHON_BIN="python3"
+fi
+
+echo "[+] Triggering automated post-commit reporting workflow..."
+$PYTHON_BIN scripts/run_post_commit_reports.py
+
+echo "[+] Generating autonomous AI improvement proposals..."
+$PYTHON_BIN scripts/generate_ai_proposals.py
+
+echo "=== Post-Commit Reports & Proposals Logged to Agent Memory ==="
