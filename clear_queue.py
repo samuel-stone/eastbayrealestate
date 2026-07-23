@@ -3,29 +3,31 @@ import psycopg2
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-def clear_queues():
+def clear_completed_queue():
     if not DATABASE_URL:
-        print("[!] DATABASE_URL environment variable is not set.")
+        print("[!] DATABASE_URL is not set.")
         return
         
     try:
         conn = psycopg2.connect(DATABASE_URL)
         cur = conn.cursor()
         
-        print("[*] Clearing redfin_scrape_queue...")
-        cur.execute("""
-            UPDATE redfin_scrape_queue
-            SET status = 'completed', completed_at = NOW()
-            WHERE status IS NULL OR status IN ('queued', 'running');
-        """)
-        
+        print("[*] Checking current queue status counts...")
+        cur.execute("SELECT status, COUNT(*) FROM redfin_scrape_queue GROUP BY status;")
+        for status, count in cur.fetchall():
+            print(f"    - {status}: {count}")
+            
+        print("\n[*] Clearing 'completed' and 'failed' records from redfin_scrape_queue...")
+        cur.execute("DELETE FROM redfin_scrape_queue WHERE status IN ('completed', 'failed');")
+        deleted_count = cur.rowcount
         conn.commit()
-        print("[+] Queue successfully cleared and marked as completed.")
+        
+        print(f"[+] Successfully removed {deleted_count} old queue entries.")
         
         cur.close()
         conn.close()
     except Exception as e:
-        print(f"[!] Error clearing queue (DB might be in read-only mode if disk is full): {e}")
+        print(f"[!] Error clearing queue: {e}")
 
 if __name__ == "__main__":
-    clear_queues()
+    clear_completed_queue()

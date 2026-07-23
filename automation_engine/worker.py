@@ -76,7 +76,8 @@ def safe_log_event(
 def process_job(job):
 
     job_id = job["id"]
-    job_name = job["name"]
+    # Fixed: Fallback to task_type since 'name' key doesn't exist on the database row dict
+    job_name = job.get("task_type") or job.get("name", "unknown_task")
 
     started_at = datetime.now()
 
