@@ -22,5 +22,4 @@ SCHEDULES = [
         "name": "daily_market_report",
         "interval": 86400
     }
-
 ]

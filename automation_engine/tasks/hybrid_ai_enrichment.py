@@ -226,3 +226,19 @@ Provide three concise strategic outreach ideas for a real estate agent.
 if __name__ == "__main__":
 
     run_task()
+
+
+def main():
+    """
+    Automation Engine entry point.
+    """
+
+    print(
+        "[+] Hybrid AI Enrichment Task Entry Point"
+    )
+
+    return run_task()
+
+
+if __name__ == "__main__":
+    main()

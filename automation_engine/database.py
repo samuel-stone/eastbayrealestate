@@ -1,4 +1,7 @@
 import os
+import socket
+from datetime import datetime
+
 import psycopg2
 import psycopg2.extras
 
@@ -7,17 +10,20 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+WORKER_ID = socket.gethostname()
+
+
 def get_connection():
     """
-    Creates PostgreSQL connection.
-    Returns rows as dictionaries.
+    PostgreSQL connection factory.
+    Returns dictionary rows.
     """
 
-    database_url = os.environ.get("DATABASE_URL")
+    database_url = os.getenv("DATABASE_URL")
 
     if not database_url:
         raise RuntimeError(
-            "DATABASE_URL environment variable is missing."
+            "DATABASE_URL missing"
         )
 
     return psycopg2.connect(
@@ -26,43 +32,73 @@ def get_connection():
     )
 
 
+# ============================================================
+# Schema
+# ============================================================
+
 def init_db():
-    """
-    Initialize automation engine tables.
-    """
 
     conn = get_connection()
 
     try:
         with conn.cursor() as cur:
 
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS jobs (
-                    id SERIAL PRIMARY KEY,
-                    name TEXT NOT NULL,
-                    status TEXT DEFAULT 'queued',
-                    attempts INTEGER DEFAULT 0,
-                    created_at TIMESTAMP DEFAULT NOW(),
-                    started_at TIMESTAMP,
-                    completed_at TIMESTAMP,
-                    last_error TEXT
-                )
-                """
-            )
+            cur.execute("""
+            CREATE TABLE IF NOT EXISTS jobs (
 
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS execution_events (
-                    id SERIAL PRIMARY KEY,
-                    job_id INTEGER REFERENCES jobs(id),
-                    event_type TEXT NOT NULL,
-                    message TEXT,
-                    metadata JSONB DEFAULT '{}'::jsonb,
-                    created_at TIMESTAMP DEFAULT NOW()
-                )
-                """
-            )
+                id SERIAL PRIMARY KEY,
+
+                name TEXT NOT NULL,
+
+                status TEXT DEFAULT 'queued',
+
+                attempts INTEGER DEFAULT 0,
+
+                worker_id TEXT,
+
+                created_at TIMESTAMP DEFAULT NOW(),
+
+                started_at TIMESTAMP,
+
+                completed_at TIMESTAMP,
+
+                heartbeat_at TIMESTAMP,
+
+                next_attempt_at TIMESTAMP DEFAULT NOW(),
+
+                result JSONB DEFAULT '{}'::jsonb,
+
+                last_error TEXT
+
+            );
+            """)
+
+
+            cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_jobs_queue
+            ON jobs(status, created_at)
+            WHERE status='queued';
+            """)
+
+
+            cur.execute("""
+            CREATE TABLE IF NOT EXISTS execution_events (
+
+                id SERIAL PRIMARY KEY,
+
+                job_id INTEGER REFERENCES jobs(id),
+
+                event_type TEXT NOT NULL,
+
+                message TEXT,
+
+                metadata JSONB DEFAULT '{}'::jsonb,
+
+                created_at TIMESTAMP DEFAULT NOW()
+
+            );
+            """)
+
 
         conn.commit()
 
@@ -70,11 +106,12 @@ def init_db():
         conn.close()
 
 
+
+# ============================================================
+# Job creation
+# ============================================================
 
 def add_job(name):
-    """
-    Add a queued job.
-    """
 
     conn = get_connection()
 
@@ -82,80 +119,32 @@ def add_job(name):
 
         with conn.cursor() as cur:
 
-            cur.execute(
-                """
-                INSERT INTO jobs(name)
-                VALUES(%s)
-                RETURNING id
-                """,
-                (name,)
-            )
-
-            job_id = cur.fetchone()["id"]
-
-        conn.commit()
-
-        return job_id
-
-    finally:
-        conn.close()
-
-
-
-def get_job():
-    """
-    Atomically claim next queued job.
-    Prevents duplicate workers.
-    """
-
-    conn = get_connection()
-
-    try:
-
-        with conn.cursor() as cur:
-
-            cur.execute(
-                """
-                SELECT *
-                FROM jobs
-                WHERE status='queued'
-                ORDER BY created_at
-                LIMIT 1
-                FOR UPDATE SKIP LOCKED
-                """
+            cur.execute("""
+            INSERT INTO jobs(name)
+            VALUES(%s)
+            RETURNING *
+            """,
+            (name,)
             )
 
             job = cur.fetchone()
-
-
-            if job:
-
-                cur.execute(
-                    """
-                    UPDATE jobs
-                    SET
-                        status='running',
-                        started_at=NOW(),
-                        attempts=attempts+1
-                    WHERE id=%s
-                    """,
-                    (job["id"],)
-                )
 
 
         conn.commit()
 
         return job
 
+
     finally:
         conn.close()
 
 
 
-def complete_job(job_id):
-    """
-    Mark job successful.
-    """
+# ============================================================
+# Atomic worker claim
+# ============================================================
+
+def get_job():
 
     conn = get_connection()
 
@@ -163,29 +152,66 @@ def complete_job(job_id):
 
         with conn.cursor() as cur:
 
-            cur.execute(
-                """
-                UPDATE jobs
-                SET
-                    status='completed',
-                    completed_at=NOW(),
-                    last_error=NULL
-                WHERE id=%s
-                """,
-                (job_id,)
+            cur.execute("""
+            UPDATE jobs
+
+            SET
+
+                status='running',
+
+                worker_id=%s,
+
+                started_at=NOW(),
+
+                heartbeat_at=NOW(),
+
+                attempts=attempts+1
+
+
+            WHERE id = (
+
+                SELECT id
+
+                FROM jobs
+
+                WHERE status='queued'
+
+                AND next_attempt_at <= NOW()
+
+                ORDER BY created_at
+
+                LIMIT 1
+
+                FOR UPDATE SKIP LOCKED
+
             )
+
+            RETURNING *
+
+            """,
+            (WORKER_ID,)
+            )
+
+
+            job = cur.fetchone()
+
 
         conn.commit()
 
+        return job
+
+
     finally:
+
         conn.close()
 
 
 
-def fail_job(job_id, error):
-    """
-    Retry failed jobs up to three times.
-    """
+# ============================================================
+# Heartbeat
+# ============================================================
+
+def heartbeat(job_id):
 
     conn = get_connection()
 
@@ -193,36 +219,34 @@ def fail_job(job_id, error):
 
         with conn.cursor() as cur:
 
-            cur.execute(
-                """
-                UPDATE jobs
-                SET
-                    status =
-                    CASE
-                        WHEN attempts < 3
-                        THEN 'queued'
-                        ELSE 'failed'
-                    END,
-                    last_error=%s
-                WHERE id=%s
-                """,
-                (
-                    str(error),
-                    job_id
-                )
+            cur.execute("""
+            UPDATE jobs
+
+            SET heartbeat_at=NOW()
+
+            WHERE id=%s
+
+            """,
+            (job_id,)
             )
+
 
         conn.commit()
 
     finally:
+
         conn.close()
 
 
 
-def clear_completed_jobs(days=30):
-    """
-    Remove old completed jobs.
-    """
+# ============================================================
+# Completion
+# ============================================================
+
+def complete_job(
+    job_id,
+    result
+):
 
     conn = get_connection()
 
@@ -230,27 +254,106 @@ def clear_completed_jobs(days=30):
 
         with conn.cursor() as cur:
 
-            cur.execute(
-                """
-                DELETE FROM jobs
-                WHERE status='completed'
-                AND completed_at <
-                    NOW() - (%s || ' days')::interval
-                """,
-                (days,)
-            )
+            cur.execute("""
+            UPDATE jobs
 
-            deleted = cur.rowcount
+            SET
+
+                status='completed',
+
+                completed_at=NOW(),
+
+                result=%s,
+
+                last_error=NULL
+
+
+            WHERE id=%s
+
+            """,
+            (
+                psycopg2.extras.Json(result),
+                job_id
+            )
+            )
 
 
         conn.commit()
 
-        return deleted
 
     finally:
+
         conn.close()
 
 
+
+# ============================================================
+# Failure + retry
+# ============================================================
+
+def fail_job(
+    job_id,
+    error
+):
+
+    conn = get_connection()
+
+    try:
+
+        with conn.cursor() as cur:
+
+            cur.execute("""
+            UPDATE jobs
+
+            SET
+
+                status =
+                CASE
+
+                    WHEN attempts < 3
+                    THEN 'queued'
+
+                    ELSE 'failed'
+
+                END,
+
+
+                next_attempt_at =
+                CASE
+
+                    WHEN attempts < 3
+                    THEN NOW() + INTERVAL '5 minutes'
+
+                    ELSE NULL
+
+                END,
+
+
+                last_error=%s
+
+
+            WHERE id=%s
+
+            """,
+            (
+                str(error),
+                job_id
+            )
+            )
+
+
+        conn.commit()
+
+
+    finally:
+
+        conn.close()
+
+
+
+# ============================================================
+# Telemetry
+# ============================================================
 
 def log_event(
     job_id,
@@ -258,10 +361,6 @@ def log_event(
     message,
     metadata=None
 ):
-    """
-    Write execution telemetry.
-    Worker owns lifecycle logging.
-    """
 
     conn = get_connection()
 
@@ -269,32 +368,33 @@ def log_event(
 
         with conn.cursor() as cur:
 
-            cur.execute(
-                """
-                INSERT INTO execution_events(
-                    job_id,
-                    event_type,
-                    message,
-                    metadata
-                )
-                VALUES(
-                    %s,
-                    %s,
-                    %s,
-                    %s
-                )
-                """,
-                (
-                    job_id,
-                    event_type,
-                    message,
-                    psycopg2.extras.Json(
-                        metadata or {}
-                    )
+            cur.execute("""
+            INSERT INTO execution_events(
+
+                job_id,
+                event_type,
+                message,
+                metadata
+
+            )
+
+            VALUES(%s,%s,%s,%s)
+
+            """,
+            (
+                job_id,
+                event_type,
+                message,
+                psycopg2.extras.Json(
+                    metadata or {}
                 )
             )
+            )
+
 
         conn.commit()
 
+
     finally:
+
         conn.close()

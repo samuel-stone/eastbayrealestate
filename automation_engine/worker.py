@@ -1,35 +1,33 @@
 import time
 import signal
 import traceback
-
 from datetime import datetime
 
 from automation_engine.database import (
     get_job,
     complete_job,
     fail_job,
+    heartbeat,
     log_event
 )
 
 from automation_engine.task_registry import run_task
 
 
+
 running = True
 
 
 
-def shutdown(signum, frame):
-    """
-    Graceful worker shutdown.
-    """
+def shutdown(sig, frame):
 
     global running
 
     print(
-        "[WORKER] Shutdown signal received."
+        "[WORKER] Shutdown requested"
     )
 
-    running = False
+    running=False
 
 
 
@@ -45,29 +43,26 @@ signal.signal(
 
 
 
-def safe_log_event(
+def safe_log(
     job_id,
-    event_type,
+    event,
     message,
     metadata=None
 ):
-    """
-    Logging should never crash the worker.
-    """
 
     try:
 
         log_event(
             job_id,
-            event_type,
+            event,
             message,
-            metadata or {}
+            metadata
         )
 
     except Exception as e:
 
         print(
-            "[WORKER] Logging failure:",
+            "[LOGGER ERROR]",
             e
         )
 
@@ -76,81 +71,91 @@ def safe_log_event(
 def process_job(job):
 
     job_id = job["id"]
-    # Fixed: Fallback to task_type since 'name' key doesn't exist on the database row dict
-    job_name = job.get("task_type") or job.get("name", "unknown_task")
 
-    started_at = datetime.now()
+    name = job["name"]
+
+
+    started=datetime.utcnow()
 
 
     print(
-        f"[WORKER] Starting job {job_id}: {job_name}"
+        f"[WORKER] Running {job_id}: {name}"
     )
 
 
-    safe_log_event(
+    safe_log(
         job_id,
         "started",
-        f"Started job {job_name}",
-        {
-            "attempt": job.get(
-                "attempts",
-                0
-            ) + 1,
-            "started_at": started_at.isoformat()
-        }
+        name
     )
 
 
     try:
 
+        heartbeat(job_id)
+
+
         result = run_task(job)
 
 
-        finished_at = datetime.now()
+        heartbeat(job_id)
+
+
+        if not result.get(
+            "success"
+        ):
+
+            raise RuntimeError(
+                result.get(
+                    "error",
+                    "Task failed"
+                )
+            )
+
 
         duration = (
-            finished_at - started_at
+            datetime.utcnow()
+            -
+            started
         ).total_seconds()
 
 
-        safe_log_event(
+        result["duration_seconds"] = duration
+
+
+        complete_job(
             job_id,
-            "completed",
-            f"Completed job {job_name}",
-            {
-                "result": result,
-                "duration_seconds": duration,
-                "completed_at": finished_at.isoformat()
-            }
+            result
         )
 
 
-        complete_job(job_id)
+        safe_log(
+            job_id,
+            "completed",
+            name,
+            result
+        )
 
 
         print(
-            f"[WORKER] Completed job {job_id} "
-            f"in {duration:.2f}s"
+            f"[WORKER] Complete {job_id} "
+            f"{duration:.2f}s"
         )
 
 
     except Exception as e:
 
-        error_trace = traceback.format_exc()
+
+        traceback_text = traceback.format_exc()
 
 
-        print(
-            f"[WORKER] Failed job {job_id}: {e}"
-        )
-
-
-        safe_log_event(
+        safe_log(
             job_id,
             "failed",
-            f"Job failed: {str(e)}",
+            str(e),
             {
-                "exception_type": type(e).__name__,
-                "traceback": error_trace[-3000:]
+                "traceback":
+                    traceback_text[-3000:]
             }
         )
 
@@ -161,25 +166,32 @@ def process_job(job):
         )
 
 
+        print(
+            f"[WORKER] FAILED {job_id}: {e}"
+        )
+
+
 
 def main():
 
     print(
-        "Automation Worker online"
+        "Automation worker online"
     )
 
 
     while running:
 
+
         try:
 
-            job = get_job()
+
+            job=get_job()
 
 
             if not job:
 
                 print(
-                    "[WORKER] No jobs"
+                    "[WORKER] idle"
                 )
 
                 time.sleep(10)
@@ -190,10 +202,11 @@ def main():
             process_job(job)
 
 
+
         except Exception as e:
 
             print(
-                "[WORKER] Loop failure:",
+                "[WORKER LOOP ERROR]",
                 e
             )
 
@@ -202,11 +215,13 @@ def main():
             time.sleep(10)
 
 
+
     print(
-        "[WORKER] Shutdown complete."
+        "Worker stopped"
     )
 
 
 
-if __name__ == "__main__":
+if __name__=="__main__":
+
     main()
