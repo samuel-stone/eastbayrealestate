@@ -4,3 +4,4 @@ playwright
 psycopg2-binary
 requests
 google-genai
+python-dotenv
