@@ -1,33 +1,21 @@
 import os
-import sys
 import json
 import subprocess
 import hashlib
 import urllib.request
 import urllib.error
-
 import pandas as pd
 import streamlit as st
 import plotly.express as px
 
-# ---------------------------------------------------------
-# Ensure project root is available for local architecture modules
-# ---------------------------------------------------------
-ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
-
-if ROOT_DIR not in sys.path:
-    sys.path.insert(0, ROOT_DIR)
-
-# ---------------------------------------------------------
 # Import local architecture agents & pooled core engine
-# ---------------------------------------------------------
 import code_architect
 import analytics_architect
 import business_proposal_architect
 import avery_architect
 import scraper_architect
 import cma_architect
-from core_engine import DatabasePool, fetch_dataframe
+from core_engine import DatabasePool
 
 st.set_page_config(
     page_title="East Bay Real Estate & AI Architecture Hub",
@@ -384,101 +372,14 @@ elif nav_category == "🛠️ SQL Console":
                 st.error(f"❌ Query Error: {e}")
 
 elif nav_category == "🏗️ Codebase Architect":
-
     st.subheader("🏗️ Local AI Codebase Architect")
-
-    st.markdown(
-        """
-        Runs repository analysis using the architecture agent.
-        
-        Findings should include:
-        - evidence
-        - affected files
-        - recommended action
-        - confidence
-        """
-    )
-
-    if st.button("🚀 Run Codebase Review & Proposals"):
-
-        with st.spinner("AI Architect analyzing repository..."):
-
-            try:
-                result = code_architect.generate_proposals()
-
-                st.success("Architecture analysis completed.")
-
-                # New structured response
-                if isinstance(result, dict):
-
-                    st.markdown("### 🤖 Agent Output")
-
-                    st.json(result)
-
-                    if "findings" in result:
-
-                        st.markdown("### Findings")
-
-                        for finding in result["findings"]:
-
-                            with st.expander(
-                                finding.get(
-                                    "title",
-                                    "Architecture Finding"
-                                )
-                            ):
-
-                                st.write(
-                                    finding.get(
-                                        "problem",
-                                        ""
-                                    )
-                                )
-
-                                st.markdown(
-                                    "**Evidence**"
-                                )
-
-                                st.code(
-                                    finding.get(
-                                        "evidence",
-                                        "No evidence supplied"
-                                    )
-                                )
-
-                                st.markdown(
-                                    f"""
-                                    Severity:
-                                    {finding.get('severity')}
-
-                                    Confidence:
-                                    {finding.get('confidence')}
-                                    """
-                                )
-
-
-                # Old response compatibility
-                elif isinstance(result, tuple):
-
-                    proposals, source = result
-
-                    st.success(
-                        f"Generated via {source}"
-                    )
-
-                    st.markdown(proposals)
-
-
-                else:
-
-                    st.write(result)
-
-
-            except Exception as e:
-
-                st.error(
-                    f"Code Architect failed: {e}"
-                )
+    st.markdown("Run a live architectural inspection of your repository code using your local Ollama instance with robust timeout protection.")
+    
+    if st.button("Run Codebase Review & Proposals"):
+        with st.spinner("AI Architect is analyzing your repository files..."):
+            proposals, source = code_architect.generate_proposals()
+        st.success(f"Analysis generated successfully via {source}!")
+        st.markdown(proposals)
 
 elif nav_category == "📓 Analytics Workstation":
     st.subheader("📓 Advanced Analytics Workstation & Model Studio")

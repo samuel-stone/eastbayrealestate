@@ -3,88 +3,323 @@ import json
 import urllib.request
 import urllib.error
 from datetime import datetime
+
 from core_engine import DatabasePool
 
-def generate_proposals():
-    """Generates a focused, safe, and actionable architectural refactoring proposal via local Ollama API with extended timeout."""
-    target_model = os.environ.get("OLLAMA_MODEL", "llama3.2:3b")
-    
-    prompt = (
-        "You are an expert Principal AI Software Architect. Provide a focused, safe, and strictly actionable "
-        "refactoring proposal for the East Bay Real Estate repository. The proposal must target core connection pooling "
-        "in `core_engine.py` and SQL query performance in `app.py`. "
-        "Include a precise summary, targeted code adjustments, and verification steps that can be safely executed "
-        "in a database sandbox without breaking existing tables."
+
+ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def load_repository_context():
+    """
+    Load real repository files so the AI reviews actual code
+    instead of generating generic architecture advice.
+    """
+
+    files_to_review = [
+        "app.py",
+        "core_engine.py",
+        "automation_engine/database.py",
+        "automation_engine/worker.py",
+        "automation_engine/task_registry.py",
+        "automation_engine/ai_client.py",
+    ]
+
+    context_blocks = []
+
+    print("[AI Architect] Loading repository context...")
+
+    for filename in files_to_review:
+        path = os.path.join(ROOT_DIR, filename)
+
+        if not os.path.exists(path):
+            print(f"[AI Architect] Skipping missing file: {filename}")
+            continue
+
+        try:
+            with open(path, "r", encoding="utf-8") as file:
+                content = file.read()
+
+            # Prevent oversized Ollama prompts
+            content = content[:10000]
+
+            context_blocks.append(
+                f"""
+==================================================
+FILE: {filename}
+==================================================
+
+{content}
+"""
+            )
+
+        except Exception as e:
+            print(
+                f"[AI Architect] Failed reading {filename}: {e}"
+            )
+
+    if not context_blocks:
+        return "No repository files were available for review."
+
+    return "\n".join(context_blocks)
+
+
+def build_architect_prompt():
+
+    repository_context = load_repository_context()
+
+    return f"""
+You are the Codebase Architect for the East Bay Real Estate automation repository.
+
+Your job is to review REAL PROVIDED CODE ONLY.
+
+Repository stack:
+- Python
+- Streamlit
+- PostgreSQL
+- psycopg2
+- custom DatabasePool
+- automation_engine agents
+- Ollama local inference
+
+IMPORTANT RULES:
+
+1. NEVER invent frameworks.
+2. NEVER recommend Flask, Django, SQLAlchemy, SQLite, or other technologies unless they already exist in the provided code.
+3. Do not assume missing files.
+4. Do not create generic examples.
+5. Every recommendation requires evidence from the supplied files.
+6. If evidence is unavailable say:
+   "Insufficient evidence."
+
+For every finding include:
+
+- Finding
+- Evidence
+    - filename
+    - relevant code section
+    - explanation
+- Current behavior
+- Risk
+- Recommendation
+- Verification steps
+- Confidence score (0-100)
+
+Return a structured engineering review.
+
+The actual repository files are below:
+
+{repository_context}
+"""
+
+
+def call_ollama(prompt, target_model):
+
+    print(
+        f"""
+[AI Architect] Pinging Ollama:
+Model: {target_model}
+Timeout: 120 seconds
+"""
     )
-    
-    proposal_text = ""
-    source_engine = ""
 
-    print(f"\n[AI Architect] Pinging local Ollama API at http://127.0.0.1:11434/api/generate for model '{target_model}' (Timeout: 120s)...")
+    url = "http://127.0.0.1:11434/api/generate"
 
-    try:
-        url = "http://127.0.0.1:11434/api/generate"
-        payload = json.dumps({
+    payload = json.dumps(
+        {
             "model": target_model,
             "prompt": prompt,
             "stream": False,
             "options": {
-                "temperature": 0.2,
-                "num_predict": 768
+                "temperature": 0.05,
+                "num_predict": 1500
             }
-        }).encode("utf-8")
-        
-        req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
-        
-        # Extended timeout to 120 seconds to allow large local models time to initialize and generate
-        with urllib.request.urlopen(req, timeout=120) as response:
-            status_code = response.getcode()
-            print(f"[AI Architect] Ollama API responded with HTTP status: {status_code}")
-            
-            if status_code == 200:
-                res_data = json.loads(response.read().decode("utf-8"))
-                proposal_text = res_data.get("response", "").strip()
-                if proposal_text:
-                    source_engine = f"Local Ollama API ({target_model})"
-                    print(f"[AI Architect] Successfully generated response via local model ({len(proposal_text)} chars).")
-    except urllib.error.URLError as url_err:
-        print(f"[AI Architect] URLError connecting to Ollama daemon: {url_err.reason}. Is 'ollama serve' running?")
-    except urllib.error.HTTPError as http_err:
-        print(f"[AI Architect] HTTPError from Ollama daemon: {http_err.code} - {http_err.reason}")
-    except Exception as e:
-        print(f"[AI Architect] Unexpected error or timeout during local Ollama generation: {type(e).__name__} - {e}")
+        }
+    ).encode("utf-8")
 
-    # Fallback only if local API call fails completely
-    if not proposal_text:
-        print("[AI Architect] Warning: Falling back to Safe Fallback Engine due to generation timeout or connection refusal.")
-        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        proposal_text = f"""### ACTIONABLE REFACTORING PROPOSAL: Safe Connection Pooling & Query Optimization ({timestamp})
-- **Target Files**: `core_engine.py` & `app.py`
-- **Actionable Scope**:
-  1. **Connection Pool Bounds**: Ensure max connection limits and timeout guards are strictly enforced during concurrent worker execution.
-  2. **JSONB Casting Optimization**: Standardize `(observation::jsonb)->>'title'` casts across proposal queries to prevent runtime operator type errors.
-- **Safety Guarantee**: Fully compatible with existing table schemas and verified via automated sandbox query plan checks.
+    request = urllib.request.Request(
+        url,
+        data=payload,
+        headers={
+            "Content-Type": "application/json"
+        },
+        method="POST"
+    )
+
+    with urllib.request.urlopen(
+        request,
+        timeout=120
+    ) as response:
+
+        if response.status != 200:
+            raise RuntimeError(
+                f"Ollama returned HTTP {response.status}"
+            )
+
+        data = json.loads(
+            response.read().decode("utf-8")
+        )
+
+        return data.get(
+            "response",
+            ""
+        ).strip()
+
+
+def fallback_proposal():
+
+    timestamp = datetime.now().strftime(
+        "%Y-%m-%d %H:%M:%S"
+    )
+
+    return f"""
+### ACTIONABLE REFACTORING PROPOSAL
+Generated by Safe Fallback Engine
+
+Timestamp:
+{timestamp}
+
+Finding:
+Database reliability improvements should be reviewed.
+
+Evidence:
+Insufficient evidence. Local AI generation was unavailable.
+
+Risk:
+Potential missed optimization opportunities.
+
+Recommendation:
+
+1. Review DatabasePool connection lifecycle.
+2. Verify worker retry behavior.
+3. Confirm agent_memory JSONB schema consistency.
+
+Verification:
+
+- Run database health checks.
+- Review worker logs.
+- Validate migration compatibility.
 """
-        source_engine = f"Safe Fallback Engine ({target_model})"
 
-    # Persist the proposal into agent memory with a unique timestamp title
+def save_to_agent_memory(
+    proposal_text,
+    source_engine
+):
+    """
+    Persist architect output into agent_memory.
+    """
+
+    timestamp_slug = datetime.now().strftime(
+        "%Y-%m-%d %H:%M:%S.%f"
+    )
+
+    title = (
+        f"Actionable Architecture Patch - "
+        f"{timestamp_slug}"
+    )
+
+    observation = {
+        "type": "proposal",
+        "title": title,
+        "source_agent": "code_architect",
+        "source_engine": source_engine,
+        "summary": proposal_text[:1000],
+        "full_proposal": proposal_text,
+        "created_at": timestamp_slug
+    }
+
     try:
-        timestamp_slug = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
-        title_str = f"Actionable Architecture Patch - {timestamp_slug}"
-        
         with DatabasePool.get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "INSERT INTO agent_memory (observation, status, created_at) VALUES (%s, 'pending', NOW())",
-                    (json.dumps({
-                        "type": "proposal",
-                        "title": title_str,
-                        "summary": proposal_text[:350] + "..."
-                    }),)
+                    """
+                    INSERT INTO agent_memory
+                    (
+                        observation,
+                        status,
+                        created_at
+                    )
+                    VALUES
+                    (
+                        %s,
+                        'pending',
+                        NOW()
+                    )
+                    """,
+                    (
+                        json.dumps(
+                            observation,
+                            ensure_ascii=False
+                        ),
+                    )
                 )
+
             conn.commit()
-        print(f"[AI Architect] Successfully persisted proposal '{title_str}' to database agent_memory.")
-    except Exception as db_err:
-        print(f"[AI Architect] Failed to persist proposal to agent memory: {db_err}")
+
+        print(
+            f"[AI Architect] Saved proposal: {title}"
+        )
+
+    except Exception as e:
+        print(
+            f"[AI Architect] Memory write failed: {e}"
+        )
+
+
+def generate_proposals():
+    """
+    Streamlit entry point.
+    Generates grounded architecture proposals.
+    """
+
+    target_model = os.environ.get(
+        "OLLAMA_MODEL",
+        "llama3.2:3b"
+    )
+
+    proposal_text = ""
+    source_engine = ""
+
+    prompt = build_architect_prompt()
+
+    try:
+
+        proposal_text = call_ollama(
+            prompt,
+            target_model
+        )
+
+        if proposal_text:
+
+            source_engine = (
+                f"Local Ollama API ({target_model})"
+            )
+
+            print(
+                f"[AI Architect] Generated "
+                f"{len(proposal_text)} chars"
+            )
+
+    except Exception as e:
+
+        print(
+            f"[AI Architect] Ollama failed: {e}"
+        )
+
+
+    if not proposal_text:
+
+        proposal_text = fallback_proposal()
+
+        source_engine = (
+            f"Safe Fallback Engine ({target_model})"
+        )
+
+
+    save_to_agent_memory(
+        proposal_text,
+        source_engine
+    )
+
 
     return proposal_text, source_engine

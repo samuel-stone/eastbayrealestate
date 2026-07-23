@@ -1,63 +1,223 @@
 import os
 import time
 import random
+import json
+import requests
+
 from google import genai
 from google.genai import errors
-import requests
-import json
 
-gemini_client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
+
+# Lazy-loaded Gemini client
+_gemini_client = None
+
+
+def get_gemini_client():
+    """
+    Lazily initialize Gemini only when required.
+
+    This prevents worker startup failures when
+    GEMINI_API_KEY is not configured.
+    """
+
+    global _gemini_client
+
+    if _gemini_client is not None:
+        return _gemini_client
+
+    api_key = os.environ.get("GEMINI_API_KEY")
+
+    if not api_key:
+        raise RuntimeError(
+            "GEMINI_API_KEY is not configured."
+        )
+
+    _gemini_client = genai.Client(
+        api_key=api_key
+    )
+
+    return _gemini_client
+
+
 
 def route_task(task_type: str) -> str:
     """
-    Hybrid commit routing.
-    Simple/cheap checks go to local Ollama; judgment calls go to Gemini.
+    Hybrid AI routing.
+
+    Cheap deterministic tasks:
+        Ollama
+
+    Complex reasoning:
+        Gemini
     """
-    if task_type in ["formatting", "lint_summary", "static_analysis_restatement"]:
+
+    ollama_tasks = [
+        "formatting",
+        "lint_summary",
+        "static_analysis_restatement",
+        "simple_review"
+    ]
+
+    if task_type in ollama_tasks:
         return "ollama"
+
     return "gemini"
 
-def ask_ai(prompt: str, task_type: str = "judgment_call", max_retries: int = 4):
+
+
+def ask_ollama(prompt: str):
     """
-    Routes the prompt to the selected model provider based on the routing rule.
-    Includes Exponential Backoff for handling Gemini API rate limits (HTTP 429).
+    Local Ollama generation.
     """
-    provider = route_task(task_type)
-    print(f"🧠 Routing task '{task_type}' to provider: {provider}")
-    
-    if provider == "gemini":
-        for attempt in range(max_retries):
-            try:
-                # Upgraded to 2.5-flash to resolve 1.5-flash deprecation 404s
-                response = gemini_client.models.generate_content(
-                    model='gemini-2.5-flash',
-                    contents=prompt
-                )
-                clean_text = response.text.replace("```json", "").replace("```", "").strip()
-                return clean_text
-                
-            except errors.APIError as e:
-                if e.code == 429:
-                    if attempt == max_retries - 1:
-                        print(f"❌ Gemini rate limit exceeded after {max_retries} retries.")
-                        raise e
-                        
-                    sleep_time = (2 ** attempt) + random.uniform(0, 1)
-                    print(f"⚠️ Rate limit hit (429). Retrying in {sleep_time:.2f} seconds...")
-                    time.sleep(sleep_time)
-                else:
-                    raise e
-                
-    elif provider == "ollama":
-        url = "http://localhost:11434/api/generate"
-        payload = {
-            "model": "llama3.2:3b",
-            "prompt": prompt,
-            "stream": False
+
+    model = os.environ.get(
+        "OLLAMA_MODEL",
+        "llama3.2:3b"
+    )
+
+    url = "http://127.0.0.1:11434/api/generate"
+
+    payload = {
+        "model": model,
+        "prompt": prompt,
+        "stream": False,
+        "options": {
+            "temperature": 0.1,
+            "num_predict": 1200
         }
-        res = requests.post(url, json=payload)
-        res.raise_for_status()
-        return res.json().get("response", "")
-        
-    else:
-        raise ValueError(f"Unknown provider: {provider}")
+    }
+
+    response = requests.post(
+        url,
+        json=payload,
+        timeout=120
+    )
+
+    response.raise_for_status()
+
+    data = response.json()
+
+    return data.get(
+        "response",
+        ""
+    ).strip()
+
+
+
+def ask_gemini(prompt: str, max_retries: int = 4):
+    """
+    Gemini generation with exponential backoff.
+    """
+
+    client = get_gemini_client()
+
+    for attempt in range(max_retries):
+
+        try:
+
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt
+            )
+
+            return response.text.strip()
+
+
+        except Exception as exc:
+
+            print(
+                f"[Gemini] Attempt {attempt + 1}/{max_retries} failed: {exc}"
+            )
+
+            if attempt == max_retries - 1:
+                raise
+
+            sleep_time = (
+                2 ** attempt
+            ) + random.random()
+
+            time.sleep(
+                sleep_time
+            )
+
+
+
+def ask_ai(
+    prompt: str,
+    task_type: str = "judgment_call",
+    max_retries: int = 4
+):
+    """
+    Main AI gateway.
+
+    Routes requests between:
+        - Ollama
+        - Gemini
+
+    Automatically falls back when Gemini
+    is unavailable.
+    """
+
+    provider = route_task(task_type)
+
+    print(
+        f"[AI Client] Routing task '{task_type}' -> {provider}"
+    )
+
+
+    if provider == "ollama":
+
+        try:
+
+            return {
+                "provider": "ollama",
+                "response": ask_ollama(prompt)
+            }
+
+        except Exception as exc:
+
+            return {
+                "provider": "ollama",
+                "response": "",
+                "error": str(exc)
+            }
+
+
+
+    # Gemini path
+
+    try:
+
+        return {
+            "provider": "gemini",
+            "response": ask_gemini(
+                prompt,
+                max_retries=max_retries
+            )
+        }
+
+
+    except Exception as gemini_error:
+
+        print(
+            "[AI Client] Gemini unavailable. "
+            "Falling back to Ollama."
+        )
+
+        try:
+
+            return {
+                "provider": "ollama_fallback",
+                "response": ask_ollama(prompt),
+                "gemini_error": str(gemini_error)
+            }
+
+
+        except Exception as ollama_error:
+
+            return {
+                "provider": "failed",
+                "response": "",
+                "gemini_error": str(gemini_error),
+                "ollama_error": str(ollama_error)
+            }

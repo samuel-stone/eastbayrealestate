@@ -1,225 +1,80 @@
-import asyncio
-import random
-import os
-import psycopg2
-
-from psycopg2.extras import RealDictCursor
-from playwright.async_api import async_playwright
-
-from scraper.parse_redfin_html import parse_listing
-
-
-DATABASE_URL = os.getenv("DATABASE_URL")
-
-
-def get_db_connection():
-    return psycopg2.connect(
-        DATABASE_URL,
-        cursor_factory=RealDictCursor
-    )
-
-
-def get_tasks():
-
-    conn = get_db_connection()
-    cur = conn.cursor()
-
-    try:
-
-        cur.execute("""
-            SELECT
-                id,
-                address,
-                url
-            FROM redfin_scrape_queue
-            WHERE status IS NULL
-               OR status = 'queued'
-            ORDER BY id
-            LIMIT 5;
-        """)
-
-        tasks = cur.fetchall()
-
-        if tasks:
-
-            ids = [task["id"] for task in tasks]
-
-            cur.execute("""
-                UPDATE redfin_scrape_queue
-                SET
-                    status = 'running',
-                    started_at = NOW()
-                WHERE id = ANY(%s);
-            """, (ids,))
-
-            conn.commit()
-
-        return tasks
-
-
-    except Exception as e:
-
-        print(f"[!] Error fetching tasks: {e}")
-        return []
-
-
-    finally:
-
-        cur.close()
-        conn.close()
-
-
-
-def update_queue_status(task_id, status, error=None):
-
-    conn = get_db_connection()
-    cur = conn.cursor()
-
-    try:
-
-        cur.execute("""
-            UPDATE redfin_scrape_queue
-            SET
-                status = %s,
-                last_error = %s,
-                completed_at =
-                    CASE
-                        WHEN %s = 'completed'
-                        THEN NOW()
-                        ELSE completed_at
-                    END
-            WHERE id = %s;
-        """, (
-            status,
-            error,
-            status,
-            task_id
-        ))
-
-        conn.commit()
-
-
-    except Exception as e:
-
-        print(
-            f"[!] Queue update failed: {e}"
-        )
-
-
-    finally:
-
-        cur.close()
-        conn.close()
-
-
-
-async def process(task, page):
-
-    task_id = task["id"]
-    url = task["url"]
-
-    if "redfin.com" not in url:
-
-        print(
-            f"[!] Skipping non-Redfin URL: {url}"
-        )
-
-        update_queue_status(
-            task_id,
-            "failed",
-            "Non-Redfin URL"
-        )
-
-        return
-
-
-    print(
-        f"\nTASK {task_id}"
-    )
-
-    print(
-        f"URL: {url}"
-    )
-
-
-    try:
-
-        await page.goto(
-            url,
-            timeout=60000,
-            wait_until="domcontentloaded"
-        )
-
-
-        await asyncio.sleep(
-            random.uniform(3,5)
-        )
-
-
-        html_content = await page.content()
-
-
-        data = parse_listing(
-            html_content,
-            url,
-            task["address"]
-        )
-
-
-        if not data:
-
-            print(
-                f"[!] Failed parsing {url}"
-            )
-
-            update_queue_status(
-                task_id,
-                "failed",
-                "Parser returned no data"
-            )
-
-            return
-
-
-
-        conn = get_db_connection()
-        cur = conn.cursor()
-
-
-        try:
-
-            cur.execute("""
-                INSERT INTO properties
-                (
-                    address,
-                    url,
-                    price,
-                    beds,
-                    baths,
-                    sqft,
-                    dom,
-                    price_drops,
-                    is_fixer,
-                    last_scraped_at
-                )
-
-                VALUES
-                (
-                    %s,%s,%s,%s,%s,%s,%s,%s,%s,NOW()
-                )
-
-                ON CONFLICT(address)
-
-                DO UPDATE SET
-
-                    url = EXCLUDED.url,
-                    price = EXCLUDED.price,
-                    beds = EXCLUDED.beds,
-                    baths = EXCLUDED.baths,
-                    sqft = EXCLUDED.sqft,
-                    dom = EXCLUDED.dom,
-                    price_drops = EXCLUDED.price_drops,
-                    is_fixer = EXCLUDED.is_fixer,
-                    last_scraped_at = NOW();
-
-            """, (
+import re
+
+def clean_number(value):
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return value
+    
+    numbers = re.findall(r"\d+", str(value).replace(",", ""))
+    if not numbers:
+        return None
+        
+    return int(numbers[0])
+
+def extract_address(html):
+    """Pull address from Redfin HTML metadata."""
+    patterns = [
+        r'"streetAddress":"([^"]+)"',
+        r'"address":"([^"]+)"',
+        r'<title>([^<]+)</title>'
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, html, re.IGNORECASE)
+        if match:
+            value = match.group(1)
+            if value:
+                return value.strip()
+    return None
+
+def extract_price(html):
+    match = re.search(r'\$[\d,]+', html)
+    if match:
+        return clean_number(match.group(0))
+    return None
+
+def extract_beds(html):
+    match = re.search(r'(\d+)\s*(?:beds|bd)', html, re.IGNORECASE)
+    if match:
+        return clean_number(match.group(1))
+    return None
+
+def extract_baths(html):
+    match = re.search(r'(\d+(?:\.\d+)?)\s*(?:baths|ba)', html, re.IGNORECASE)
+    if match:
+        return float(match.group(1))
+    return None
+
+def extract_sqft(html):
+    match = re.search(r'([\d,]+)\s*(?:sq\.?\s*ft|square feet)', html, re.IGNORECASE)
+    if match:
+        return clean_number(match.group(1))
+    return None
+
+def parse_listing(html, url=None, address=None):
+    """Parse Redfin listing HTML."""
+    listing = {
+        "address": address or extract_address(html),
+        "url": url,
+        "price": extract_price(html),
+        "beds": extract_beds(html),
+        "baths": extract_baths(html),
+        "sqft": extract_sqft(html),
+        "dom": None,
+        "price_drops": 0,
+        "is_fixer": False
+    }
+    return listing
+
+def parse_listing_data(raw):
+    return {
+        "address": raw.get("address"),
+        "url": raw.get("url"),
+        "price": clean_number(raw.get("price")),
+        "beds": clean_number(raw.get("beds")),
+        "baths": raw.get("baths"),
+        "sqft": clean_number(raw.get("sqft")),
+        "dom": clean_number(raw.get("dom")),
+        "price_drops": clean_number(raw.get("price_drops")),
+        "is_fixer": raw.get("is_fixer", False)
+    }
