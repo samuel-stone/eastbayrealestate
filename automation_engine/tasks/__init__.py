@@ -7,3 +7,11 @@ TASKS = {
     'enrich_properties': enrich_properties.main,
     'hybrid_ai_enrichment': hybrid_ai_enrichment.main,
 }
+
+def main():
+
+    print(
+        "Hybrid AI enrichment task started"
+    )
+
+    return None
