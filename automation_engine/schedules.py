@@ -2,7 +2,7 @@ SCHEDULES = [
 
     {
         "name": "scrape_redfin",
-        "interval": 3600
+        "interval": 21600
     },
 
 
