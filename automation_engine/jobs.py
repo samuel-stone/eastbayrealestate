@@ -9,6 +9,10 @@ def add_job(task_type, payload=None):
 
     if payload is None:
         payload = {}
+        
+    # Ensure payload contains the task type so workers/payload inspectors don't fail
+    if "task" not in payload:
+        payload["task"] = task_type
 
     cur.execute(
         """
@@ -45,8 +49,8 @@ def add_job(task_type, payload=None):
 if __name__ == "__main__":
 
     add_job(
-        "scrape_listings",
+        "scrape_listing",
         {
-            "zip":"94506"
+            "zip": "94506"
         }
     )
