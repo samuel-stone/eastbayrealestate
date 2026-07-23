@@ -1,5 +1,6 @@
 import json
 import re
+
 import requests
 
 from db_pool import get_pooled_connection
@@ -11,122 +12,86 @@ ZIP_CODES = [
 
 
 HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 Chrome/120 Safari/537.36"
-    ),
-    "Accept-Language": "en-US,en;q=0.9"
+    "User-Agent":
+        "Mozilla/5.0",
+    "Accept-Language":
+        "en-US,en;q=0.9"
 }
 
 
 
-# --------------------------------------------------
-# Redfin Discovery
-# --------------------------------------------------
+def discover_redfin(zipcode):
 
-def discover_redfin(zipcode, limit=100):
+    url = (
+        f"https://www.redfin.com/zipcode/{zipcode}"
+    )
 
-    url = f"https://www.redfin.com/zipcode/{zipcode}"
-
-    print("[REDFIN] Fetching:", url)
-
-    try:
-        response = requests.get(
-            url,
-            headers=HEADERS,
-            timeout=30
-        )
-
-        response.raise_for_status()
-
-        html = response.text
-
-    except Exception as e:
-        print("[REDFIN] Failed:", e)
-        return []
+    print(
+        "[REDFIN] Fetching:",
+        url
+    )
 
 
-    listings = set()
+    r = requests.get(
+        url,
+        headers=HEADERS,
+        timeout=30
+    )
 
+
+    html = r.text
+
+
+    listings = []
+
+
+    # Redfin embedded listing URLs
 
     matches = re.findall(
-        r'https://www\.redfin\.com/[^"]+/home/\d+',
+        r'https://www\.redfin\.com/CA/[^"]+/home/\d+',
         html
     )
 
 
-    for url in matches:
+    for u in matches:
 
-        url = url.replace("\\/", "/")
+        if zipcode in u:
 
-
-        # MUST be California
-        if "/CA/" not in url:
-            continue
-
-
-        # MUST contain target zipcode
-        if zipcode not in url:
-            continue
+            listings.append(
+                u
+            )
 
 
-        # reject NY
-        bad = [
-            "/NY/",
-            "new-york",
-            "brooklyn",
-            "queens",
-            "manhattan"
-        ]
+    # Remove duplicates
 
-
-        if any(
-            x.lower() in url.lower()
-            for x in bad
-        ):
-            continue
-
-
-        listings.add(url)
-
-
-
-    results = list(listings)
-
-
-    print(
-        f"[REDFIN] Valid {zipcode} listings:",
-        len(results)
+    listings = list(
+        dict.fromkeys(listings)
     )
 
 
-    return results[:limit]
+    print(
+        "[REDFIN] Found:",
+        len(listings)
+    )
 
-# --------------------------------------------------
-# Queue
-# --------------------------------------------------
+
+    return listings
+
+
+
 
 def enqueue_listing(url):
 
-
     payload = {
-
         "url": url,
-
         "source": "redfin",
-
         "task": "scrape_listing"
-
     }
-
 
 
     with get_pooled_connection() as conn:
 
-
         with conn.cursor() as cur:
-
-
 
             cur.execute(
                 """
@@ -134,12 +99,6 @@ def enqueue_listing(url):
                 FROM ai_tasks
                 WHERE task_type='scrape_listing'
                 AND payload->>'url'=%s
-                AND status IN
-                (
-                    'pending',
-                    'running',
-                    'completed'
-                )
                 LIMIT 1
                 """,
                 (
@@ -148,17 +107,9 @@ def enqueue_listing(url):
             )
 
 
-
             if cur.fetchone():
 
-                print(
-                    "Already queued:",
-                    url
-                )
-
                 return False
-
-
 
 
             cur.execute(
@@ -168,17 +119,14 @@ def enqueue_listing(url):
                     task_type,
                     payload,
                     status,
-                    retry_count,
-                    priority
+                    retry_count
                 )
-
                 VALUES
                 (
                     'scrape_listing',
                     %s,
                     'pending',
-                    0,
-                    5
+                    0
                 )
                 """,
                 (
@@ -188,7 +136,6 @@ def enqueue_listing(url):
 
 
         conn.commit()
-
 
 
     print(
@@ -202,50 +149,31 @@ def enqueue_listing(url):
 
 
 
-# --------------------------------------------------
-# Main
-# --------------------------------------------------
-
 def main():
 
     total = 0
 
 
-
     for zipcode in ZIP_CODES:
 
-
-        print(
-            "Exploring ZIP:",
+        listings = discover_redfin(
             zipcode
         )
 
 
-
-        listings = discover_redfin(
-            zipcode,
-            limit=1
-        )
-
-
-
         for url in listings:
-
 
             if enqueue_listing(url):
 
                 total += 1
 
 
-
-
     print(
-        f"Discovery complete. Added {total} tasks."
+        "Added:",
+        total
     )
 
 
 
-
 if __name__ == "__main__":
-
     main()
